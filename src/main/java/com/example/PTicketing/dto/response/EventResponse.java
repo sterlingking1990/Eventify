@@ -28,5 +28,8 @@ public class EventResponse {
     private String organizerName;
     private Long organizerId;
     private List<TicketTypeResponse> ticketTypes;
+    private String bankName;
+    private String bankAccountNumber;
+    private String bankAccountName;
     private LocalDateTime createdAt;
 }

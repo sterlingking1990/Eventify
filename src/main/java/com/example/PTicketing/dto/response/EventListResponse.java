@@ -14,6 +14,7 @@ import java.time.LocalDateTime;
 public class EventListResponse {
     private Long id;
     private String title;
+    private String description;
     private String flyerImage;
     private String categoryName;
     private EventType type;

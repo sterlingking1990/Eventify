@@ -19,4 +19,7 @@ public class UpdateEventRequest {
     private Double longitude;
     private LocalDateTime startDate;
     private LocalDateTime endDate;
+    private String bankName;
+    private String bankAccountNumber;
+    private String bankAccountName;
 }

@@ -1,5 +1,6 @@
 package com.example.PTicketing.dto.request;
 
+import com.example.PTicketing.enums.PaymentMethod;
 import jakarta.validation.constraints.Email;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
@@ -28,4 +29,6 @@ public class InitializeOrderRequest {
     private String discountCode;
 
     private String referralCode;
+
+    private PaymentMethod paymentMethod;
 }

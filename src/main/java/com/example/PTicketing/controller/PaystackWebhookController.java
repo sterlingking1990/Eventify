@@ -1,5 +1,6 @@
 package com.example.PTicketing.controller;
 
+import com.example.PTicketing.service.OrderService;
 import com.example.PTicketing.service.PaystackService;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -13,6 +14,7 @@ import org.springframework.web.bind.annotation.*;
 public class PaystackWebhookController {
 
     private final PaystackService paystackService;
+    private final OrderService orderService;
     private final ObjectMapper objectMapper;
 
     @PostMapping("/webhook")
@@ -28,6 +30,8 @@ public class PaystackWebhookController {
             JsonNode body = objectMapper.readTree(payload);
             String event = body.get("event").asText();
             String reference = body.get("data").get("reference").asText();
+
+            orderService.handlePaystackWebhook(event, reference);
 
             return ResponseEntity.ok("Received");
         } catch (Exception e) {

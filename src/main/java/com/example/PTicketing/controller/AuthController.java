@@ -3,11 +3,14 @@ package com.example.PTicketing.controller;
 import com.example.PTicketing.dto.request.*;
 import com.example.PTicketing.dto.response.ApiResponse;
 import com.example.PTicketing.dto.response.AuthResponse;
+import com.example.PTicketing.dto.response.UserResponse;
+import com.example.PTicketing.security.CustomUserDetails;
 import com.example.PTicketing.service.AuthService;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.*;
 
 @RestController
@@ -20,6 +23,12 @@ public class AuthController {
     @PostMapping("/register")
     public ResponseEntity<AuthResponse> register(@Valid @RequestBody SignUpRequest request) {
         return ResponseEntity.status(HttpStatus.CREATED).body(authService.register(request));
+    }
+
+    @GetMapping("/me")
+    public ResponseEntity<UserResponse> getCurrentUser(
+            @AuthenticationPrincipal CustomUserDetails user) {
+        return ResponseEntity.ok(authService.getCurrentUser(user.getId()));
     }
 
     @PostMapping("/login")

@@ -29,6 +29,7 @@ public class Event {
     @Column(columnDefinition = "TEXT")
     private String description;
 
+    @Column(columnDefinition = "TEXT")
     private String flyerImage;
 
     @ManyToOne(fetch = FetchType.LAZY)
@@ -57,6 +58,12 @@ public class Event {
 
     @Column(nullable = false, unique = true)
     private String slug;
+
+    private String bankName;
+
+    private String bankAccountNumber;
+
+    private String bankAccountName;
 
     @Column(updatable = false)
     private LocalDateTime createdAt;

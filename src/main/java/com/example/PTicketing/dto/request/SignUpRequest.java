@@ -18,4 +18,6 @@ public class SignUpRequest {
 
     @NotBlank
     private String fullName;
+
+    private String role;
 }

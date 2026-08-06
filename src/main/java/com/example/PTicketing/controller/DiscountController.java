@@ -3,6 +3,7 @@ package com.example.PTicketing.controller;
 import com.example.PTicketing.dto.request.CreateDiscountRequest;
 import com.example.PTicketing.dto.response.ApiResponse;
 import com.example.PTicketing.dto.response.DiscountCodeResponse;
+import com.example.PTicketing.exception.UnauthorizedException;
 import com.example.PTicketing.security.CustomUserDetails;
 import com.example.PTicketing.service.DiscountService;
 import jakarta.validation.Valid;
@@ -34,6 +35,7 @@ public class DiscountController {
     public ResponseEntity<List<DiscountCodeResponse>> getDiscounts(
             @PathVariable Long eventId,
             @AuthenticationPrincipal CustomUserDetails user) {
+        if (user == null) throw new UnauthorizedException("Authentication required");
         return ResponseEntity.ok(discountService.getDiscounts(eventId, user.getId()));
     }
 

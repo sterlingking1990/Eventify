@@ -28,13 +28,14 @@ public class EventController {
     @GetMapping
     public ResponseEntity<List<EventListResponse>> getAllEvents(
             @RequestParam(required = false) String category,
-            @RequestParam(required = false) String type) {
-        return ResponseEntity.ok(eventService.getAllEvents(category, type));
+            @RequestParam(required = false) String type,
+            @RequestParam(required = false) String search) {
+        return ResponseEntity.ok(eventService.getAllEvents(category, type, search));
     }
 
     @GetMapping("/{slug}")
     public ResponseEntity<EventResponse> getEventBySlug(@PathVariable String slug) {
-        return ResponseEntity.ok(eventService.getEventBySlug(slug));
+        return ResponseEntity.ok(eventService.getEventBySlugPublic(slug));
     }
 
     @GetMapping("/my-events")

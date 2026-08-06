@@ -4,6 +4,7 @@ import com.example.PTicketing.dto.request.IssueCompTicketRequest;
 import com.example.PTicketing.dto.response.CompTicketResponse;
 import com.example.PTicketing.entity.*;
 import com.example.PTicketing.enums.TicketStatus;
+import com.example.PTicketing.exception.BadRequestException;
 import com.example.PTicketing.exception.ResourceNotFoundException;
 import com.example.PTicketing.exception.UnauthorizedException;
 import com.example.PTicketing.repository.*;
@@ -37,7 +38,8 @@ public class CompTicketService {
         String qrText = java.util.UUID.randomUUID().toString();
 
         com.example.PTicketing.entity.TicketType tt = ticketTypeRepository.findByEventId(eventId)
-                .stream().findFirst().orElse(null);
+                .stream().findFirst()
+                .orElseThrow(() -> new BadRequestException("Event has no ticket types configured"));
 
         com.example.PTicketing.entity.Ticket ticket = com.example.PTicketing.entity.Ticket.builder()
                 .event(event)

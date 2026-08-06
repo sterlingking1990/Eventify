@@ -21,28 +21,31 @@ public class PaystackService {
     private final RestTemplate restTemplate;
     private final ObjectMapper objectMapper;
 
-    public String initializeTransaction(String email, BigDecimal amount, String reference) {
+    public String initializeTransaction(String email, BigDecimal amount, String reference, String callbackUrl) {
         HttpHeaders headers = new HttpHeaders();
         headers.add("Authorization", "Bearer " + paystackConfig.getSecretKey());
         headers.setContentType(MediaType.APPLICATION_JSON);
 
-        Map<String, Object> body = Map.of(
-                "email", email,
-                "amount", amount.multiply(BigDecimal.valueOf(100)).toBigInteger().toString(),
-                "reference", reference
-        );
+        java.util.HashMap<String, Object> body = new java.util.HashMap<>();
+        body.put("email", email);
+        body.put("amount", amount.multiply(BigDecimal.valueOf(100)).toBigInteger().toString());
+        body.put("reference", reference);
+        if (callbackUrl != null && !callbackUrl.isBlank()) {
+            body.put("callback_url", callbackUrl);
+        }
 
         HttpEntity<Map<String, Object>> request = new HttpEntity<>(body, headers);
 
         try {
-            ResponseEntity<JsonNode> response = restTemplate.postForEntity(
+            ResponseEntity<String> response = restTemplate.postForEntity(
                     paystackConfig.getInitializeUrl(),
                     request,
-                    JsonNode.class
+                    String.class
             );
 
-            if (response.getBody() != null && response.getBody().has("data")) {
-                return response.getBody().get("data").get("authorization_url").asText();
+            JsonNode responseBody = objectMapper.readTree(response.getBody());
+            if (responseBody.has("data") && responseBody.get("data").has("authorization_url")) {
+                return responseBody.get("data").get("authorization_url").asText();
             }
             throw new RuntimeException("Paystack initialization failed");
         } catch (Exception e) {
@@ -57,16 +60,16 @@ public class PaystackService {
         HttpEntity<Void> request = new HttpEntity<>(headers);
 
         try {
-            ResponseEntity<JsonNode> response = restTemplate.exchange(
+            ResponseEntity<String> response = restTemplate.exchange(
                     paystackConfig.getVerifyUrl() + reference,
                     HttpMethod.GET,
                     request,
-                    JsonNode.class
+                    String.class
             );
 
-            if (response.getBody() != null && response.getBody().has("data")) {
-                String status = response.getBody().get("data").get("status").asText();
-                return "success".equalsIgnoreCase(status);
+            JsonNode responseBody = objectMapper.readTree(response.getBody());
+            if (responseBody.has("data") && responseBody.get("data").has("status")) {
+                return "success".equalsIgnoreCase(responseBody.get("data").get("status").asText());
             }
             return false;
         } catch (Exception e) {

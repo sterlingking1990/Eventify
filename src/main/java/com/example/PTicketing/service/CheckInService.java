@@ -6,6 +6,7 @@ import com.example.PTicketing.entity.*;
 import com.example.PTicketing.enums.TicketStatus;
 import com.example.PTicketing.exception.BadRequestException;
 import com.example.PTicketing.exception.ResourceNotFoundException;
+import com.example.PTicketing.exception.UnauthorizedException;
 import com.example.PTicketing.repository.*;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
@@ -69,11 +70,7 @@ public class CheckInService {
                 .orElseThrow(() -> new ResourceNotFoundException("Event not found"));
 
         if (!event.getOrganizer().getId().equals(userId)) {
-            User user = userRepository.findById(userId).orElse(null);
-            if (user == null || !user.getId().equals(event.getOrganizer().getId())) {
-                List<CheckIn> checkIns = checkInRepository.findByEventIdOrderByScannedAtDesc(eventId);
-                return checkIns.stream().map(this::toResponse).toList();
-            }
+            throw new UnauthorizedException("Only the event organizer can view check-in logs");
         }
 
         List<CheckIn> checkIns = checkInRepository.findByEventIdOrderByScannedAtDesc(eventId);

@@ -40,11 +40,21 @@ public class AuthService {
             throw new DuplicateResourceException("Email already registered");
         }
 
+        UserRole role = UserRole.ATTENDEE;
+        if (request.getRole() != null) {
+            try {
+                UserRole requested = UserRole.valueOf(request.getRole().toUpperCase());
+                if (requested == UserRole.ATTENDEE || requested == UserRole.ORGANIZER) {
+                    role = requested;
+                }
+            } catch (IllegalArgumentException ignored) {}
+        }
+
         User user = User.builder()
                 .email(request.getEmail())
                 .password(passwordEncoder.encode(request.getPassword()))
                 .fullName(request.getFullName())
-                .role(UserRole.ORGANIZER)
+                .role(role)
                 .build();
 
         user = userRepository.save(user);
@@ -86,7 +96,7 @@ public class AuthService {
                     .fullName(request.getFullName())
                     .googleId(request.getGoogleId())
                     .avatarUrl(request.getAvatarUrl())
-                    .role(UserRole.ORGANIZER)
+                    .role(UserRole.ATTENDEE)
                     .build();
         } else {
             user.setGoogleId(request.getGoogleId());
@@ -165,6 +175,12 @@ public class AuthService {
                 .token(token)
                 .user(toUserResponse(user))
                 .build();
+    }
+
+    public UserResponse getCurrentUser(Long userId) {
+        User user = userRepository.findById(userId)
+                .orElseThrow(() -> new ResourceNotFoundException("User not found"));
+        return toUserResponse(user);
     }
 
     private UserResponse toUserResponse(User user) {

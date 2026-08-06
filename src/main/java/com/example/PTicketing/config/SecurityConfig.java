@@ -2,6 +2,7 @@ package com.example.PTicketing.config;
 
 import com.example.PTicketing.security.JwtAuthenticationFilter;
 import lombok.RequiredArgsConstructor;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.http.HttpMethod;
@@ -28,12 +29,28 @@ public class SecurityConfig {
     private final JwtAuthenticationFilter jwtAuthFilter;
     private final UserDetailsService userDetailsService;
 
+    @Value("${cors.allowed-origins:http://localhost:5173}")
+    private String allowedOrigins;
+
     @Bean
     public SecurityFilterChain securityFilterChain(HttpSecurity http) throws Exception {
         http
+                .cors(cors -> cors.configurationSource(corsConfigurationSource()))
                 .csrf(AbstractHttpConfigurer::disable)
                 .sessionManagement(session -> session.sessionCreationPolicy(STATELESS))
                 .authorizeHttpRequests(auth -> auth
+                        .requestMatchers(HttpMethod.GET, "/api/v1/auth/me").authenticated()
+                        .requestMatchers(
+                                "/api/v1/auth/**",
+                                "/api/v1/categories/**",
+                                "/api/v1/newsletter/**",
+                                "/api/v1/paystack/**",
+                                "/v3/api-docs/**",
+                                "/swagger-ui/**",
+                                "/swagger-ui.html"
+                        ).permitAll()
+                        .requestMatchers(HttpMethod.POST, "/api/v1/orders/initialize").permitAll()
+                        .requestMatchers(HttpMethod.GET, "/api/v1/orders/verify").permitAll()
                         .requestMatchers(HttpMethod.GET, "/api/v1/events/my-events").authenticated()
                         .requestMatchers(HttpMethod.GET, "/api/v1/events/*/analytics").authenticated()
                         .requestMatchers(HttpMethod.GET, "/api/v1/events/*/complimentary").authenticated()
@@ -41,25 +58,40 @@ public class SecurityConfig {
                         .requestMatchers(HttpMethod.PUT, "/api/v1/events/**").authenticated()
                         .requestMatchers(HttpMethod.DELETE, "/api/v1/events/**").authenticated()
                         .requestMatchers(HttpMethod.GET, "/api/v1/orders").authenticated()
-                        .requestMatchers(
-                                "/api/v1/auth/**",
-                                "/api/v1/categories/**",
-                                "/api/v1/newsletter/**",
-                                "/api/v1/paystack/**",
-                                "/api/v1/orders/initialize",
-                                "/api/v1/orders/verify",
-                                "/api/v1/tickets/**",
-                                "/v3/api-docs/**",
-                                "/swagger-ui/**",
-                                "/swagger-ui.html"
-                        ).permitAll()
+                        .requestMatchers("/api/v1/check-in/**").authenticated()
+                        .requestMatchers("/api/v1/tickets/**").authenticated()
                         .requestMatchers(HttpMethod.GET, "/api/v1/events/**").permitAll()
                         .anyRequest().authenticated()
                 )
                 .authenticationProvider(authenticationProvider())
+                .exceptionHandling(ex -> ex
+                        .authenticationEntryPoint((request, response, authException) -> {
+                            response.setStatus(401);
+                            response.setContentType("application/json");
+                            response.getWriter().write("{\"success\":false,\"message\":\"Unauthorized\",\"data\":null}");
+                        })
+                        .accessDeniedHandler((request, response, accessDeniedException) -> {
+                            response.setStatus(403);
+                            response.setContentType("application/json");
+                            response.getWriter().write("{\"success\":false,\"message\":\"Access denied\",\"data\":null}");
+                        })
+                )
                 .addFilterBefore(jwtAuthFilter, UsernamePasswordAuthenticationFilter.class);
 
         return http.build();
+    }
+
+    @Bean
+    public org.springframework.web.cors.CorsConfigurationSource corsConfigurationSource() {
+        org.springframework.web.cors.CorsConfiguration config = new org.springframework.web.cors.CorsConfiguration();
+        config.setAllowedOrigins(java.util.List.of(allowedOrigins.split(",")));
+        config.setAllowedMethods(java.util.List.of("GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"));
+        config.setAllowedHeaders(java.util.List.of("*"));
+        config.setAllowCredentials(true);
+        config.setMaxAge(3600L);
+        org.springframework.web.cors.UrlBasedCorsConfigurationSource source = new org.springframework.web.cors.UrlBasedCorsConfigurationSource();
+        source.registerCorsConfiguration("/api/**", config);
+        return source;
     }
 
     @Bean

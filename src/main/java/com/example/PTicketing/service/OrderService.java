@@ -1,5 +1,6 @@
 package com.example.PTicketing.service;
 
+import com.example.PTicketing.config.PaystackConfig;
 import com.example.PTicketing.dto.request.InitializeOrderRequest;
 import com.example.PTicketing.dto.response.OrderResponse;
 import com.example.PTicketing.dto.response.TicketResponse;
@@ -33,6 +34,7 @@ public class OrderService {
     private final EmailService emailService;
     private final DiscountService discountService;
     private final ReferralService referralService;
+    private final PaystackConfig paystackConfig;
 
     @Transactional
     public OrderResponse initializeOrder(InitializeOrderRequest request, Long userId) {
@@ -71,6 +73,8 @@ public class OrderService {
 
         String orderRef = "PTK-" + UUID.randomUUID().toString().substring(0, 12).toUpperCase();
 
+        PaymentMethod method = request.getPaymentMethod() != null ? request.getPaymentMethod() : PaymentMethod.PAYSTACK;
+
         Order order = Order.builder()
                 .orderRef(orderRef)
                 .event(event)
@@ -78,13 +82,15 @@ public class OrderService {
                 .feeAmount(feeAmount)
                 .discountAmount(discountAmount)
                 .totalAmount(totalAmount)
-                .paymentMethod(PaymentMethod.PAYSTACK)
+                .paymentMethod(method)
                 .paymentStatus(PaymentStatus.PENDING)
                 .currency("NGN")
                 .buyerEmail(request.getBuyerEmail())
                 .buyerName(request.getBuyerName())
                 .discountCode(request.getDiscountCode())
                 .referralCode(request.getReferralCode())
+                .ticketTypeId(request.getTicketTypeId())
+                .quantity(request.getQuantity())
                 .build();
 
         if (userId != null) {
@@ -93,11 +99,18 @@ public class OrderService {
 
         order = orderRepository.save(order);
 
+        if (method == PaymentMethod.TRANSFER) {
+            order.setPaymentStatus(PaymentStatus.PENDING_VERIFICATION);
+            order = orderRepository.save(order);
+            return toResponse(order, null, null);
+        }
+
         if (!ticketType.isFree() && totalAmount.compareTo(BigDecimal.ZERO) > 0) {
             String paystackRef = "PTK-" + UUID.randomUUID().toString().substring(0, 20).toUpperCase();
             order.setPaystackReference(paystackRef);
             String paystackUrl = paystackService.initializeTransaction(
-                    request.getBuyerEmail(), totalAmount, paystackRef
+                    request.getBuyerEmail(), totalAmount, paystackRef,
+                    paystackConfig.getPaymentCallbackUrl()
             );
             order = orderRepository.save(order);
 
@@ -111,6 +124,8 @@ public class OrderService {
             List<Ticket> tickets = generateTickets(order, ticketType, request.getQuantity());
             ticketType.setTicketsSold(ticketType.getTicketsSold() + request.getQuantity());
             ticketTypeRepository.save(ticketType);
+
+            sendTicketConfirmationEmail(order, tickets);
 
             return toResponse(order, tickets, null);
         }
@@ -139,11 +154,24 @@ public class OrderService {
         order = orderRepository.save(order);
         processPostPayment(order);
 
-        TicketType ticketType = ticketTypeRepository.findByEventId(order.getEvent().getId())
-                .stream().findFirst().orElse(null);
-        int quantity = 1;
+        TicketType ticketType = null;
+        if (order.getTicketTypeId() != null) {
+            ticketType = ticketTypeRepository.findById(order.getTicketTypeId()).orElse(null);
+        }
+        if (ticketType == null) {
+            ticketType = ticketTypeRepository.findByEventId(order.getEvent().getId())
+                    .stream().findFirst().orElse(null);
+        }
+        int quantity = order.getQuantity() != null ? order.getQuantity() : 1;
 
         List<Ticket> tickets = generateTickets(order, ticketType, quantity);
+        if (ticketType != null) {
+            ticketType.setTicketsSold(ticketType.getTicketsSold() + quantity);
+            ticketTypeRepository.save(ticketType);
+        }
+
+        sendTicketConfirmationEmail(order, tickets);
+
         return toResponse(order, tickets, null);
     }
 
@@ -166,7 +194,25 @@ public class OrderService {
         order = orderRepository.save(order);
         processPostPayment(order);
 
-        return toResponse(order, null, null);
+        TicketType ticketType = null;
+        if (order.getTicketTypeId() != null) {
+            ticketType = ticketTypeRepository.findById(order.getTicketTypeId()).orElse(null);
+        }
+        if (ticketType == null) {
+            ticketType = ticketTypeRepository.findByEventId(order.getEvent().getId())
+                    .stream().findFirst().orElse(null);
+        }
+        int quantity = order.getQuantity() != null ? order.getQuantity() : 1;
+
+        List<Ticket> tickets = generateTickets(order, ticketType, quantity);
+        if (ticketType != null) {
+            ticketType.setTicketsSold(ticketType.getTicketsSold() + quantity);
+            ticketTypeRepository.save(ticketType);
+        }
+
+        sendTicketConfirmationEmail(order, tickets);
+
+        return toResponse(order, tickets, null);
     }
 
     public List<OrderResponse> getUserOrders(Long userId) {
@@ -274,5 +320,35 @@ public class OrderService {
                 .purchasedAt(ticket.getPurchasedAt())
                 .checkedInAt(ticket.getCheckedInAt())
                 .build();
+    }
+
+    private void sendTicketConfirmationEmail(Order order, List<Ticket> tickets) {
+        if (order.getBuyerEmail() == null || order.getBuyerEmail().isBlank()) return;
+
+        StringBuilder body = new StringBuilder();
+        body.append("Hi ").append(order.getBuyerName()).append(",\n\n");
+        body.append("Your ticket purchase is confirmed!\n\n");
+        body.append("Event: ").append(order.getEvent().getTitle()).append("\n");
+        body.append("Order Reference: ").append(order.getOrderRef()).append("\n");
+        body.append("Amount Paid: NGN ").append(order.getTotalAmount()).append("\n\n");
+        body.append("Your Ticket(s):\n");
+
+        for (Ticket ticket : tickets) {
+            body.append("- ").append(ticket.getTicketType().getName())
+                .append(" | QR Code: ").append(ticket.getQrCode()).append("\n");
+        }
+
+        body.append("\nPresent your QR code at the event entrance for check-in.\n\n");
+        body.append("Thank you for using Eventify!");
+
+        try {
+            emailService.sendSimpleEmail(
+                order.getBuyerEmail(),
+                "Your Eventify Tickets - " + order.getEvent().getTitle(),
+                body.toString()
+            );
+        } catch (Exception e) {
+            // Email failure should not break the order flow
+        }
     }
 }

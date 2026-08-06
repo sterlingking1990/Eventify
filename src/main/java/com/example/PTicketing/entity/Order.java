@@ -58,6 +58,10 @@ public class Order {
 
     private String buyerName;
 
+    private Long ticketTypeId;
+
+    private Integer quantity;
+
     @Column(updatable = false)
     private LocalDateTime createdAt;
 

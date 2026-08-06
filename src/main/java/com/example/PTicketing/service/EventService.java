@@ -18,10 +18,14 @@ import com.example.PTicketing.repository.TicketTypeRepository;
 import com.example.PTicketing.repository.UserRepository;
 import com.example.PTicketing.util.SlugUtils;
 import lombok.RequiredArgsConstructor;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
+import java.time.LocalDateTime;
 import java.util.Comparator;
 import java.util.List;
 
@@ -29,33 +33,57 @@ import java.util.List;
 @RequiredArgsConstructor
 public class EventService {
 
+    private static final Logger log = LoggerFactory.getLogger(EventService.class);
+
     private final EventRepository eventRepository;
     private final CategoryRepository categoryRepository;
     private final TicketTypeRepository ticketTypeRepository;
     private final UserRepository userRepository;
+    private final EventNotificationService eventNotificationService;
 
-    public List<EventListResponse> getAllEvents(String category, String type) {
+    public List<EventListResponse> getAllEvents(String category, String type, String search) {
         List<Event> events;
+        LocalDateTime now = LocalDateTime.now();
 
-        if (category != null && type != null) {
-            Category cat = categoryRepository.findBySlug(category).orElse(null);
-            if (cat == null) return List.of();
+        String cat = (category != null && !category.isBlank()) ? category : null;
+        String typ = (type != null && !type.isBlank()) ? type : null;
+        String q = (search != null && !search.isBlank()) ? search : null;
+
+        if (cat != null && typ != null) {
+            Category categoryObj = categoryRepository.findBySlug(cat).orElse(null);
+            if (categoryObj == null) return List.of();
             com.example.PTicketing.enums.EventType eventType =
-                    com.example.PTicketing.enums.EventType.valueOf(type.toUpperCase());
-            events = eventRepository.findByCategoryIdAndStatus(cat.getId(), EventStatus.PUBLISHED)
+                    com.example.PTicketing.enums.EventType.valueOf(typ.toUpperCase());
+            events = eventRepository.findByCategoryIdAndStatus(categoryObj.getId(), EventStatus.PUBLISHED)
                     .stream()
                     .filter(e -> e.getType() == eventType)
+                    .filter(e -> e.getEndDate() == null || e.getEndDate().isAfter(now))
                     .toList();
-        } else if (category != null) {
-            Category cat = categoryRepository.findBySlug(category).orElse(null);
-            if (cat == null) return List.of();
-            events = eventRepository.findByCategoryIdAndStatus(cat.getId(), EventStatus.PUBLISHED);
-        } else if (type != null) {
+        } else if (cat != null) {
+            Category categoryObj = categoryRepository.findBySlug(cat).orElse(null);
+            if (categoryObj == null) return List.of();
+            events = eventRepository.findByCategoryIdAndStatus(categoryObj.getId(), EventStatus.PUBLISHED)
+                    .stream()
+                    .filter(e -> e.getEndDate() == null || e.getEndDate().isAfter(now))
+                    .toList();
+        } else if (typ != null) {
             com.example.PTicketing.enums.EventType eventType =
-                    com.example.PTicketing.enums.EventType.valueOf(type.toUpperCase());
-            events = eventRepository.findByTypeAndStatus(eventType, EventStatus.PUBLISHED);
+                    com.example.PTicketing.enums.EventType.valueOf(typ.toUpperCase());
+            events = eventRepository.findByTypeAndStatus(eventType, EventStatus.PUBLISHED)
+                    .stream()
+                    .filter(e -> e.getEndDate() == null || e.getEndDate().isAfter(now))
+                    .toList();
         } else {
-            events = eventRepository.findByStatus(EventStatus.PUBLISHED);
+            events = eventRepository.findByStatusAndEndDateAfterOrEndDateIsNull(EventStatus.PUBLISHED, now);
+        }
+
+        if (q != null) {
+            String lower = q.toLowerCase();
+            events = events.stream()
+                    .filter(e -> e.getTitle().toLowerCase().contains(lower)
+                            || (e.getDescription() != null && e.getDescription().toLowerCase().contains(lower))
+                            || (e.getVenue() != null && e.getVenue().toLowerCase().contains(lower)))
+                    .toList();
         }
 
         return events.stream()
@@ -66,7 +94,13 @@ public class EventService {
     public EventResponse getEventBySlug(String slug) {
         Event event = eventRepository.findBySlug(slug)
                 .orElseThrow(() -> new ResourceNotFoundException("Event not found"));
-        return toResponse(event);
+        return toResponse(event, true);
+    }
+
+    public EventResponse getEventBySlugPublic(String slug) {
+        Event event = eventRepository.findBySlug(slug)
+                .orElseThrow(() -> new ResourceNotFoundException("Event not found"));
+        return toResponse(event, false);
     }
 
     public List<EventListResponse> getMyEvents(Long userId) {
@@ -98,13 +132,16 @@ public class EventService {
                 .organizer(organizer)
                 .category(category)
                 .type(request.getType())
-                .status(EventStatus.DRAFT)
+                .status(EventStatus.PUBLISHED)
                 .venue(request.getVenue())
                 .latitude(request.getLatitude())
                 .longitude(request.getLongitude())
                 .startDate(request.getStartDate())
                 .endDate(request.getEndDate())
                 .slug(slug)
+                .bankName(request.getBankName())
+                .bankAccountNumber(request.getBankAccountNumber())
+                .bankAccountName(request.getBankAccountName())
                 .build();
 
         event = eventRepository.save(event);
@@ -126,7 +163,9 @@ public class EventService {
             }
         }
 
-        return toResponse(event);
+        eventNotificationService.notifyUsersAboutEvent(event, organizerId);
+
+        return toResponse(event, true);
     }
 
     @Transactional
@@ -172,9 +211,18 @@ public class EventService {
         if (request.getEndDate() != null) {
             event.setEndDate(request.getEndDate());
         }
+        if (request.getBankName() != null) {
+            event.setBankName(request.getBankName());
+        }
+        if (request.getBankAccountNumber() != null) {
+            event.setBankAccountNumber(request.getBankAccountNumber());
+        }
+        if (request.getBankAccountName() != null) {
+            event.setBankAccountName(request.getBankAccountName());
+        }
 
         event = eventRepository.save(event);
-        return toResponse(event);
+        return toResponse(event, true);
     }
 
     @Transactional
@@ -241,7 +289,7 @@ public class EventService {
         ticketTypeRepository.delete(tt);
     }
 
-    private EventResponse toResponse(Event event) {
+    private EventResponse toResponse(Event event, boolean includeBankDetails) {
         List<TicketTypeResponse> ticketTypes = ticketTypeRepository.findByEventId(event.getId())
                 .stream()
                 .map(this::toTicketTypeResponse)
@@ -273,6 +321,9 @@ public class EventService {
                 .organizerName(event.getOrganizer().getFullName())
                 .organizerId(event.getOrganizer().getId())
                 .ticketTypes(ticketTypes)
+                .bankName(includeBankDetails ? event.getBankName() : null)
+                .bankAccountNumber(includeBankDetails ? event.getBankAccountNumber() : null)
+                .bankAccountName(includeBankDetails ? event.getBankAccountName() : null)
                 .createdAt(event.getCreatedAt())
                 .build();
     }
@@ -288,6 +339,7 @@ public class EventService {
         return EventListResponse.builder()
                 .id(event.getId())
                 .title(event.getTitle())
+                .description(event.getDescription())
                 .flyerImage(event.getFlyerImage())
                 .categoryName(event.getCategory() != null ? event.getCategory().getName() : null)
                 .type(event.getType())
@@ -313,5 +365,19 @@ public class EventService {
                 .salesStartDate(tt.getSalesStartDate())
                 .salesEndDate(tt.getSalesEndDate())
                 .build();
+    }
+
+    @Scheduled(fixedRate = 3600000)
+    @Transactional
+    public void completePastEvents() {
+        List<Event> pastEvents = eventRepository.findByStatusAndEndDateBefore(
+                EventStatus.PUBLISHED, LocalDateTime.now());
+        for (Event event : pastEvents) {
+            event.setStatus(EventStatus.COMPLETED);
+            eventRepository.save(event);
+        }
+        if (!pastEvents.isEmpty()) {
+            log.info("Auto-completed {} past events", pastEvents.size());
+        }
     }
 }

@@ -14,11 +14,18 @@ public class PaystackConfig {
     @Value("${paystack.public-key}")
     private String publicKey;
 
+    @Value("${frontend.url:http://localhost:5173}")
+    private String frontendUrl;
+
     public String getInitializeUrl() {
         return "https://api.paystack.co/transaction/initialize";
     }
 
     public String getVerifyUrl() {
         return "https://api.paystack.co/transaction/verify/";
+    }
+
+    public String getPaymentCallbackUrl() {
+        return frontendUrl + "/payment/success";
     }
 }

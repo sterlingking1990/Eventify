@@ -5,6 +5,7 @@ import com.example.PTicketing.enums.EventStatus;
 import com.example.PTicketing.enums.EventType;
 import org.springframework.data.jpa.repository.JpaRepository;
 
+import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Optional;
 
@@ -16,4 +17,6 @@ public interface EventRepository extends JpaRepository<Event, Long> {
     List<Event> findByStatus(EventStatus status);
     List<Event> findByCategoryIdAndStatus(Long categoryId, EventStatus status);
     List<Event> findByTypeAndStatus(EventType type, EventStatus status);
+    List<Event> findByStatusAndEndDateBefore(EventStatus status, LocalDateTime endDate);
+    List<Event> findByStatusAndEndDateAfterOrEndDateIsNull(EventStatus status, LocalDateTime endDate);
 }

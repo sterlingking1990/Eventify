@@ -35,4 +35,10 @@ public class CreateEventRequest {
     private LocalDateTime endDate;
 
     private List<TicketTypeRequest> ticketTypes;
+
+    private String bankName;
+
+    private String bankAccountNumber;
+
+    private String bankAccountName;
 }
