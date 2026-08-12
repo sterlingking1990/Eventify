@@ -37,6 +37,12 @@ public class Ticket {
     @Column(nullable = false, unique = true)
     private String qrCode;
 
+    // Hosted PNG of the QR, needed by channels that deliver a message rather than
+    // an email. Persisted so a retried confirmation reuses the existing image
+    // instead of paying to upload the same code again.
+    @Column(columnDefinition = "TEXT")
+    private String qrImageUrl;
+
     @Enumerated(EnumType.STRING)
     @Column(nullable = false)
     private TicketStatus status;

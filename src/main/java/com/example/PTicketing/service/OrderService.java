@@ -35,6 +35,17 @@ public class OrderService {
     private final DiscountService discountService;
     private final ReferralService referralService;
     private final PaystackConfig paystackConfig;
+    private final PricingService pricingService;
+    // One-way dependency: IntegrationOrderService does not reference this class, so
+    // there is no bean cycle. Used only to reuse its channel-delivery path.
+    private final IntegrationOrderService integrationOrderService;
+
+    /**
+     * How long a web order holds its seats before they go back on sale. Shorter
+     * than the WhatsApp hold because card checkout completes in a browser session
+     * rather than waiting on a bank transfer.
+     */
+    private static final int WEB_HOLD_MINUTES = 15;
 
     @Transactional
     public OrderResponse initializeOrder(InitializeOrderRequest request, Long userId) {
@@ -52,9 +63,22 @@ public class OrderService {
             throw new BadRequestException("Ticket type does not belong to this event");
         }
 
-        int available = ticketType.getQuantity() - ticketType.getTicketsSold();
-        if (available < request.getQuantity()) {
-            throw new BadRequestException("Not enough tickets available. Only " + available + " left");
+        // Reserve the seats now rather than at payment time. Two reasons:
+        //
+        //  1. A read-then-write availability check loses updates when two buyers
+        //     confirm at once, which is exactly what a popular event produces.
+        //     Pushing the check into the UPDATE's WHERE clause lets the database
+        //     serialise it.
+        //  2. It matches the external-channel path, so confirmation never has to
+        //     decide whether stock was already taken — it never is.
+        //
+        // Unpaid holds are returned by IntegrationOrderService.releaseExpiredHolds.
+        int reserved = ticketTypeRepository.reserveQuantity(ticketType.getId(), request.getQuantity());
+        if (reserved == 0) {
+            int available = ticketType.getQuantity() - ticketType.getTicketsSold();
+            throw new BadRequestException(available <= 0
+                    ? "This ticket type is sold out"
+                    : "Not enough tickets available. Only " + available + " left");
         }
 
         BigDecimal subtotal = ticketType.getPrice().multiply(BigDecimal.valueOf(request.getQuantity()));
@@ -91,6 +115,8 @@ public class OrderService {
                 .referralCode(request.getReferralCode())
                 .ticketTypeId(request.getTicketTypeId())
                 .quantity(request.getQuantity())
+                .sourceChannel("web")
+                .holdExpiresAt(LocalDateTime.now().plusMinutes(WEB_HOLD_MINUTES))
                 .build();
 
         if (userId != null) {
@@ -118,12 +144,14 @@ public class OrderService {
         } else {
             order.setPaymentStatus(PaymentStatus.PAID);
             order.setPaidAt(LocalDateTime.now());
+            // Hold converted to a sale — must not be swept later.
+            order.setHoldExpiresAt(null);
             order = orderRepository.save(order);
             processPostPayment(order);
 
+            // Stock was taken by reserveQuantity above; incrementing here would
+            // double-count it.
             List<Ticket> tickets = generateTickets(order, ticketType, request.getQuantity());
-            ticketType.setTicketsSold(ticketType.getTicketsSold() + request.getQuantity());
-            ticketTypeRepository.save(ticketType);
 
             sendTicketConfirmationEmail(order, tickets);
 
@@ -131,48 +159,34 @@ public class OrderService {
         }
     }
 
+    /**
+     * Called from the success page after Paystack redirects back. Confirms the
+     * charge with Paystack before issuing anything, because this endpoint is
+     * public and the reference alone proves nothing.
+     */
     @Transactional
     public OrderResponse verifyPayment(String paystackReference) {
-        Order order = orderRepository.findByPaystackReference(paystackReference)
+        Order existing = orderRepository.findByPaystackReference(paystackReference)
                 .orElseThrow(() -> new ResourceNotFoundException("Order not found"));
 
-        if (order.getPaymentStatus() == PaymentStatus.PAID) {
-            List<Ticket> tickets = ticketRepository.findByOrderId(order.getId());
-            return toResponse(order, tickets, null);
+        if (existing.getPaymentStatus() == PaymentStatus.PAID) {
+            return toResponse(existing, ticketRepository.findByOrderId(existing.getId()), null);
         }
 
-        boolean verified = paystackService.verifyTransaction(paystackReference);
-
-        if (!verified) {
-            order.setPaymentStatus(PaymentStatus.FAILED);
-            orderRepository.save(order);
+        if (!paystackService.verifyTransaction(paystackReference)) {
+            // Release the seats this order was holding before failing it, or an
+            // abandoned card attempt keeps them off sale until the sweeper runs.
+            if (existing.getTicketTypeId() != null && existing.getQuantity() != null
+                    && existing.getHoldExpiresAt() != null) {
+                ticketTypeRepository.releaseQuantity(existing.getTicketTypeId(), existing.getQuantity());
+            }
+            existing.setPaymentStatus(PaymentStatus.FAILED);
+            existing.setHoldExpiresAt(null);
+            orderRepository.save(existing);
             throw new BadRequestException("Payment verification failed");
         }
 
-        order.setPaymentStatus(PaymentStatus.PAID);
-        order.setPaidAt(LocalDateTime.now());
-        order = orderRepository.save(order);
-        processPostPayment(order);
-
-        TicketType ticketType = null;
-        if (order.getTicketTypeId() != null) {
-            ticketType = ticketTypeRepository.findById(order.getTicketTypeId()).orElse(null);
-        }
-        if (ticketType == null) {
-            ticketType = ticketTypeRepository.findByEventId(order.getEvent().getId())
-                    .stream().findFirst().orElse(null);
-        }
-        int quantity = order.getQuantity() != null ? order.getQuantity() : 1;
-
-        List<Ticket> tickets = generateTickets(order, ticketType, quantity);
-        if (ticketType != null) {
-            ticketType.setTicketsSold(ticketType.getTicketsSold() + quantity);
-            ticketTypeRepository.save(ticketType);
-        }
-
-        sendTicketConfirmationEmail(order, tickets);
-
-        return toResponse(order, tickets, null);
+        return finalizePaidOrder(paystackReference);
     }
 
     @Transactional
@@ -180,19 +194,27 @@ public class OrderService {
         if (!"charge.success".equals(event)) {
             return null;
         }
+        return finalizePaidOrder(paystackRef);
+    }
 
-        Order order = orderRepository.findByPaystackReference(paystackRef)
+    /**
+     * Moves an order to PAID and issues its tickets, exactly once.
+     *
+     * <p>Both confirmation paths funnel through here — the success-page verify and
+     * the Paystack webhook — and they can race each other, since a buyer often
+     * returns from checkout at the same moment the webhook lands. Paystack also
+     * retries webhooks. The transition is therefore a conditional UPDATE and only
+     * the caller whose update affected a row mints tickets; everyone else reads
+     * back what was already issued.
+     */
+    private OrderResponse finalizePaidOrder(String paystackReference) {
+        // Claim before loading: claimPaid is a bulk update that clears the
+        // persistence context, so anything read beforehand would be detached with
+        // a stale status.
+        int claimed = orderRepository.claimPaid(paystackReference, LocalDateTime.now());
+
+        Order order = orderRepository.findByPaystackReference(paystackReference)
                 .orElseThrow(() -> new ResourceNotFoundException("Order not found"));
-
-        if (order.getPaymentStatus() == PaymentStatus.PAID) {
-            List<Ticket> tickets = ticketRepository.findByOrderId(order.getId());
-            return toResponse(order, tickets, null);
-        }
-
-        order.setPaymentStatus(PaymentStatus.PAID);
-        order.setPaidAt(LocalDateTime.now());
-        order = orderRepository.save(order);
-        processPostPayment(order);
 
         TicketType ticketType = null;
         if (order.getTicketTypeId() != null) {
@@ -202,15 +224,34 @@ public class OrderService {
             ticketType = ticketTypeRepository.findByEventId(order.getEvent().getId())
                     .stream().findFirst().orElse(null);
         }
-        int quantity = order.getQuantity() != null ? order.getQuantity() : 1;
 
-        List<Ticket> tickets = generateTickets(order, ticketType, quantity);
-        if (ticketType != null) {
-            ticketType.setTicketsSold(ticketType.getTicketsSold() + quantity);
-            ticketTypeRepository.save(ticketType);
+        if (claimed == 0) {
+            // Someone else already finalised it — return their tickets, don't mint more.
+            return toResponse(order, ticketRepository.findByOrderId(order.getId()), null);
         }
 
+        order.setHoldExpiresAt(null);
+        order = orderRepository.save(order);
+        processPostPayment(order);
+
+        int quantity = order.getQuantity() != null ? order.getQuantity() : 1;
+
+        // Stock was reserved when the order was created — on both the web and
+        // external-channel paths — so it is deliberately not incremented here.
+        List<Ticket> tickets = generateTickets(order, ticketType, quantity);
+
         sendTicketConfirmationEmail(order, tickets);
+
+        // An order that arrived from a message channel must be delivered there, not
+        // just emailed — its email is a synthesised placeholder nobody reads.
+        //
+        // This path can legitimately confirm such an order: Paystack redirects the
+        // buyer to the success page, which calls /orders/verify, and that often wins
+        // the race against the webhook. Delegating to the integration service keeps
+        // one delivery implementation rather than two.
+        if (order.getBuyerPhone() != null && !order.getBuyerPhone().isBlank()) {
+            integrationOrderService.deliverExistingOrder(order.getPaystackReference());
+        }
 
         return toResponse(order, tickets, null);
     }
@@ -267,17 +308,7 @@ public class OrderService {
     }
 
     private BigDecimal calculateFee(EventType eventType, BigDecimal subtotal, int quantity) {
-        if (subtotal.compareTo(BigDecimal.ZERO) == 0) {
-            return BigDecimal.ZERO;
-        }
-
-        return switch (eventType) {
-            case VOTING -> subtotal.multiply(BigDecimal.valueOf(0.08))
-                    .setScale(2, RoundingMode.HALF_UP);
-            case NORMAL -> subtotal.multiply(BigDecimal.valueOf(0.05))
-                    .add(BigDecimal.valueOf(100).multiply(BigDecimal.valueOf(quantity)))
-                    .setScale(2, RoundingMode.HALF_UP);
-        };
+        return pricingService.calculateFee(eventType, subtotal, quantity);
     }
 
     private OrderResponse toResponse(Order order, List<Ticket> tickets, String paystackUrl) {

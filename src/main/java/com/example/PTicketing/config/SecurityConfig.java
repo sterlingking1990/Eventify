@@ -1,6 +1,7 @@
 package com.example.PTicketing.config;
 
 import com.example.PTicketing.security.JwtAuthenticationFilter;
+import com.example.PTicketing.security.ServiceKeyAuthFilter;
 import lombok.RequiredArgsConstructor;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
@@ -27,6 +28,7 @@ import static org.springframework.security.config.http.SessionCreationPolicy.STA
 public class SecurityConfig {
 
     private final JwtAuthenticationFilter jwtAuthFilter;
+    private final ServiceKeyAuthFilter serviceKeyAuthFilter;
     private final UserDetailsService userDetailsService;
 
     @Value("${cors.allowed-origins:http://localhost:5173}")
@@ -54,12 +56,20 @@ public class SecurityConfig {
                         .requestMatchers(HttpMethod.GET, "/api/v1/events/my-events").authenticated()
                         .requestMatchers(HttpMethod.GET, "/api/v1/events/*/analytics").authenticated()
                         .requestMatchers(HttpMethod.GET, "/api/v1/events/*/complimentary").authenticated()
+                        // MUST be listed before the permitAll on /api/v1/events/** below.
+                        // These carry buyer names, emails, phone numbers and gate codes;
+                        // matched by that catch-all they would be world-readable.
+                        .requestMatchers(HttpMethod.GET, "/api/v1/events/*/attendees").authenticated()
+                        .requestMatchers(HttpMethod.GET, "/api/v1/events/*/attendees/**").authenticated()
                         .requestMatchers(HttpMethod.POST, "/api/v1/events/**").authenticated()
                         .requestMatchers(HttpMethod.PUT, "/api/v1/events/**").authenticated()
                         .requestMatchers(HttpMethod.DELETE, "/api/v1/events/**").authenticated()
                         .requestMatchers(HttpMethod.GET, "/api/v1/orders").authenticated()
                         .requestMatchers("/api/v1/check-in/**").authenticated()
                         .requestMatchers("/api/v1/tickets/**").authenticated()
+                        // Server-to-server. Authenticated by ServiceKeyAuthFilter, which
+                        // populates ROLE_SERVICE; the controller then enforces that role.
+                        .requestMatchers("/api/v1/integration/**").hasRole("SERVICE")
                         .requestMatchers(HttpMethod.GET, "/api/v1/events/**").permitAll()
                         .anyRequest().authenticated()
                 )
@@ -76,7 +86,8 @@ public class SecurityConfig {
                             response.getWriter().write("{\"success\":false,\"message\":\"Access denied\",\"data\":null}");
                         })
                 )
-                .addFilterBefore(jwtAuthFilter, UsernamePasswordAuthenticationFilter.class);
+                .addFilterBefore(jwtAuthFilter, UsernamePasswordAuthenticationFilter.class)
+                .addFilterBefore(serviceKeyAuthFilter, UsernamePasswordAuthenticationFilter.class);
 
         return http.build();
     }

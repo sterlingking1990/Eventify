@@ -1,0 +1,32 @@
+# Keeps the Docker build context small and, more importantly, keeps secrets out
+# of the image. The Dockerfile does `COPY src ./src`, so anything under src/ is
+# baked into a layer — being git-ignored does not help here.
+
+# ── Secrets ──────────────────────────────────────────────────────────────────
+# Local development credentials. In deployment every value comes from platform
+# environment variables via the ${VAR} placeholders in application.properties,
+# so this file must never reach the image.
+**/application-local.properties
+**/application-*.local.properties
+.env
+.env.*
+dev-env.ps1
+
+# ── Build output ─────────────────────────────────────────────────────────────
+# The jar is produced by the `build` stage inside the image and copied with
+# COPY --from=build, so the host's target/ is never read. Excluding it also stops
+# a stale host build (different JDK, different profile) confusing the context.
+target/
+
+# ── VCS and tooling ──────────────────────────────────────────────────────────
+.git/
+.gitattributes
+.gitignore
+.mvn/wrapper/maven-wrapper.jar
+*.iml
+.idea/
+.vscode/
+
+# ── Noise ────────────────────────────────────────────────────────────────────
+*.log
+*.md

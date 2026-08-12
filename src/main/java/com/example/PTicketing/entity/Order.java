@@ -58,6 +58,19 @@ public class Order {
 
     private String buyerName;
 
+    // Set when the order originates from a WhatsApp channel rather than the web
+    // checkout, where a phone number is the only identity we have.
+    private String buyerPhone;
+
+    // Identifies the external channel that created this order (e.g. "brandible-whatsapp").
+    // Null for orders placed through the Eventify web app.
+    private String sourceChannel;
+
+    // External-channel orders reserve their tickets up front so a bank transfer
+    // that takes minutes to arrive cannot be beaten to the last seat. This is when
+    // that reservation lapses and the stock goes back; null means no hold is held.
+    private LocalDateTime holdExpiresAt;
+
     private Long ticketTypeId;
 
     private Integer quantity;

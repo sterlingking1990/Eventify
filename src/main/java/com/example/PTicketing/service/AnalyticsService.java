@@ -5,6 +5,7 @@ import com.example.PTicketing.entity.*;
 import com.example.PTicketing.enums.PaymentStatus;
 import com.example.PTicketing.enums.TicketStatus;
 import com.example.PTicketing.exception.ResourceNotFoundException;
+import com.example.PTicketing.exception.UnauthorizedException;
 import com.example.PTicketing.repository.*;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
@@ -25,9 +26,19 @@ public class AnalyticsService {
     private final CheckInRepository checkInRepository;
     private final TicketTypeRepository ticketTypeRepository;
 
-    public AnalyticsResponse getEventAnalytics(Long eventId) {
+    /**
+     * @param userId the requesting organiser — verified against the event's owner.
+     *               A role check alone is not enough here: without this, any
+     *               organiser could read another's revenue by changing the id in
+     *               the URL.
+     */
+    public AnalyticsResponse getEventAnalytics(Long eventId, Long userId) {
         Event event = eventRepository.findById(eventId)
                 .orElseThrow(() -> new ResourceNotFoundException("Event not found"));
+
+        if (event.getOrganizer() == null || !event.getOrganizer().getId().equals(userId)) {
+            throw new UnauthorizedException("Not authorized to view analytics for this event");
+        }
 
         List<Order> paidOrders = orderRepository.findByEventId(eventId)
                 .stream()
