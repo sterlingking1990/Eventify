@@ -71,6 +71,15 @@ public class Order {
     // that reservation lapses and the stock goes back; null means no hold is held.
     private LocalDateTime holdExpiresAt;
 
+    // When the organiser's share of this order becomes withdrawable: the event's
+    // end plus a hold period. Stamped at sale rather than derived at read time, so
+    // an organiser cannot bring funds forward by editing the event date after the
+    // fact — see EventService, which only ever pushes this later.
+    //
+    // Null means held. Orders predating this column have no value and stay locked
+    // until backfilled; that is the safe direction to fail.
+    private LocalDateTime releasableAt;
+
     private Long ticketTypeId;
 
     private Integer quantity;

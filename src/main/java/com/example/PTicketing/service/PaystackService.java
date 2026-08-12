@@ -77,6 +77,60 @@ public class PaystackService {
         }
     }
 
+    /**
+     * Resolves an account number against a bank, returning the registered name.
+     *
+     * <p>A payout is irreversible once sent, and the organiser types their own
+     * account details. Confirming the name the bank holds is the last opportunity
+     * to catch a transposed digit before the money is gone.
+     *
+     * @return the account name, or null if it could not be resolved
+     */
+    public String resolveAccountName(String accountNumber, String bankCode) {
+        if (accountNumber == null || bankCode == null) return null;
+
+        HttpHeaders headers = new HttpHeaders();
+        headers.add("Authorization", "Bearer " + paystackConfig.getSecretKey());
+
+        try {
+            ResponseEntity<String> response = restTemplate.exchange(
+                    "https://api.paystack.co/bank/resolve?account_number=" + accountNumber
+                            + "&bank_code=" + bankCode,
+                    HttpMethod.GET,
+                    new HttpEntity<>(headers),
+                    String.class
+            );
+
+            JsonNode body = objectMapper.readTree(response.getBody());
+            if (body.path("status").asBoolean(false)) {
+                return body.path("data").path("account_name").asText(null);
+            }
+            return null;
+        } catch (Exception e) {
+            // Treated as "could not verify" rather than "invalid" — a provider
+            // outage should not block a legitimate payout request.
+            return null;
+        }
+    }
+
+    /** The provider's bank list, so the organiser picks a code rather than typing a name. */
+    public JsonNode listBanks() {
+        HttpHeaders headers = new HttpHeaders();
+        headers.add("Authorization", "Bearer " + paystackConfig.getSecretKey());
+
+        try {
+            ResponseEntity<String> response = restTemplate.exchange(
+                    "https://api.paystack.co/bank?country=nigeria&perPage=100",
+                    HttpMethod.GET,
+                    new HttpEntity<>(headers),
+                    String.class
+            );
+            return objectMapper.readTree(response.getBody()).path("data");
+        } catch (Exception e) {
+            throw new RuntimeException("Could not load bank list: " + e.getMessage());
+        }
+    }
+
     public boolean verifyWebhookSignature(String payload, String signature) {
         try {
             Mac mac = Mac.getInstance("HmacSHA512");

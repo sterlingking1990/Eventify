@@ -145,6 +145,11 @@ public class IntegrationOrderService {
                 .quantity(request.getQuantity())
                 .sourceChannel(request.getSourceChannel())
                 .holdExpiresAt(LocalDateTime.now().plusMinutes(holdMinutes))
+                // Stamped now rather than derived when the balance is read, so a
+                // later edit to the event date cannot move money that has already
+                // been released.
+                .releasableAt(event.getEndDate() != null
+                        ? event.getEndDate().plusHours(payoutHoldHours) : null)
                 .build();
 
         order = orderRepository.save(order);

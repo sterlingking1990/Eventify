@@ -14,6 +14,7 @@ import com.example.PTicketing.exception.ResourceNotFoundException;
 import com.example.PTicketing.exception.UnauthorizedException;
 import com.example.PTicketing.repository.CategoryRepository;
 import com.example.PTicketing.repository.EventRepository;
+import com.example.PTicketing.repository.OrderRepository;
 import com.example.PTicketing.repository.TicketTypeRepository;
 import com.example.PTicketing.repository.UserRepository;
 import com.example.PTicketing.util.SlugUtils;
@@ -39,6 +40,11 @@ public class EventService {
     private final CategoryRepository categoryRepository;
     private final TicketTypeRepository ticketTypeRepository;
     private final UserRepository userRepository;
+    private final OrderRepository orderRepository;
+
+    /** Must match the value used when orders are created, or holds drift on edit. */
+    @org.springframework.beans.factory.annotation.Value("${integration.payout-hold-hours:24}")
+    private int payoutHoldHours;
     private final EventNotificationService eventNotificationService;
 
     public List<EventListResponse> getAllEvents(String category, String type, String search) {
@@ -210,6 +216,14 @@ public class EventService {
         }
         if (request.getEndDate() != null) {
             event.setEndDate(request.getEndDate());
+
+            // A postponement must push the payout hold back with it, or an organiser
+            // could collect for an event that has not happened yet. The update is
+            // deliberately one-way — pushReleaseDateForEvent only ever moves a
+            // release later — so bringing an event forward cannot unlock funds
+            // early, and money already released is untouched.
+            orderRepository.pushReleaseDateForEvent(
+                    eventId, request.getEndDate().plusHours(payoutHoldHours));
         }
         if (request.getBankName() != null) {
             event.setBankName(request.getBankName());

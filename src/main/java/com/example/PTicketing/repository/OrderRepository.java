@@ -7,6 +7,7 @@ import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
+import java.math.BigDecimal;
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Optional;
@@ -49,4 +50,76 @@ public interface OrderRepository extends JpaRepository<Order, Long> {
     @Query("update Order o set o.paymentStatus = :status where o.paystackReference = :reference")
     int updateStatusByReference(@Param("reference") String reference,
                                 @Param("status") PaymentStatus status);
+
+    /**
+     * The organiser's share of everything that has become withdrawable.
+     *
+     * <p>Their share is the buyer's total minus the platform fee. Only orders whose
+     * release time has passed are counted — money for an event that has not happened
+     * yet must not be withdrawable, or an organiser could take the gate and never
+     * run the event.
+     *
+     * <p>A null releasableAt is treated as held. Orders predating that column have
+     * no value and stay locked until backfilled; failing closed is the safe
+     * direction when the alternative is releasing money early.
+     */
+    @Query("""
+           select coalesce(sum(o.totalAmount - coalesce(o.feeAmount, 0)), 0)
+             from Order o
+            where o.event.organizer.id = :userId
+              and o.paymentStatus = com.example.PTicketing.enums.PaymentStatus.PAID
+              and o.releasableAt is not null
+              and o.releasableAt <= :now
+           """)
+    BigDecimal sumReleasableByOrganizer(@Param("userId") Long userId,
+                                        @Param("now") LocalDateTime now);
+
+    /** The organiser's share that exists but has not yet cleared its hold. */
+    @Query("""
+           select coalesce(sum(o.totalAmount - coalesce(o.feeAmount, 0)), 0)
+             from Order o
+            where o.event.organizer.id = :userId
+              and o.paymentStatus = com.example.PTicketing.enums.PaymentStatus.PAID
+              and (o.releasableAt is null or o.releasableAt > :now)
+           """)
+    BigDecimal sumHeldByOrganizer(@Param("userId") Long userId,
+                                  @Param("now") LocalDateTime now);
+
+    /** Everything earned regardless of hold — what the organiser has sold in total. */
+    @Query("""
+           select coalesce(sum(o.totalAmount - coalesce(o.feeAmount, 0)), 0)
+             from Order o
+            where o.event.organizer.id = :userId
+              and o.paymentStatus = com.example.PTicketing.enums.PaymentStatus.PAID
+           """)
+    BigDecimal sumEarnedByOrganizer(@Param("userId") Long userId);
+
+    /** When the next tranche unlocks, so the UI can say more than "held". */
+    @Query("""
+           select min(o.releasableAt)
+             from Order o
+            where o.event.organizer.id = :userId
+              and o.paymentStatus = com.example.PTicketing.enums.PaymentStatus.PAID
+              and o.releasableAt is not null
+              and o.releasableAt > :now
+           """)
+    LocalDateTime findNextReleaseAt(@Param("userId") Long userId,
+                                    @Param("now") LocalDateTime now);
+
+    /**
+     * Pushes the release time later when an event is postponed.
+     *
+     * <p>Deliberately one-way: {@code releasableAt < :newReleaseAt} means bringing an
+     * event forward never unlocks funds early. Already-released money is untouched.
+     */
+    @Modifying(flushAutomatically = true)
+    @Query("""
+           update Order o
+              set o.releasableAt = :newReleaseAt
+            where o.event.id = :eventId
+              and o.releasableAt is not null
+              and o.releasableAt < :newReleaseAt
+           """)
+    int pushReleaseDateForEvent(@Param("eventId") Long eventId,
+                                @Param("newReleaseAt") LocalDateTime newReleaseAt);
 }

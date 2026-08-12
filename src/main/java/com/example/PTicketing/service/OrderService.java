@@ -10,6 +10,7 @@ import com.example.PTicketing.exception.BadRequestException;
 import com.example.PTicketing.exception.ResourceNotFoundException;
 import com.example.PTicketing.repository.*;
 import lombok.RequiredArgsConstructor;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -46,6 +47,10 @@ public class OrderService {
      * rather than waiting on a bank transfer.
      */
     private static final int WEB_HOLD_MINUTES = 15;
+
+    /** Kept in step with the external-channel path; see IntegrationOrderService. */
+    @Value("${integration.payout-hold-hours:24}")
+    private int payoutHoldHours;
 
     @Transactional
     public OrderResponse initializeOrder(InitializeOrderRequest request, Long userId) {
@@ -117,6 +122,10 @@ public class OrderService {
                 .quantity(request.getQuantity())
                 .sourceChannel("web")
                 .holdExpiresAt(LocalDateTime.now().plusMinutes(WEB_HOLD_MINUTES))
+                // Same hold rule as the external channels — the organiser's share is
+                // released a fixed period after the event ends, whichever way it sold.
+                .releasableAt(event.getEndDate() != null
+                        ? event.getEndDate().plusHours(payoutHoldHours) : null)
                 .build();
 
         if (userId != null) {

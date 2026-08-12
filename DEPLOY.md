@@ -111,6 +111,29 @@ dependencies in their own layer so source-only changes rebuild fast.
 
 ---
 
+## One-off: backfill `releasable_at`
+
+Organiser funds are released a fixed period after an event ends, driven by
+`orders.releasable_at`. Orders created before that column existed have no value
+and are treated as **held** — safe, but permanently locked until backfilled.
+
+Run once against the database:
+
+```sql
+UPDATE eventify.orders o
+SET releasable_at = e.end_date + interval '24 hours'
+FROM eventify.events e
+WHERE o.event_id = e.id
+  AND o.releasable_at IS NULL;
+```
+
+Adjust the interval if `INTEGRATION_PAYOUT_HOLD_HOURS` is not 24.
+
+Note this also means **`ddl-auto=validate` will refuse to start** until the new
+columns exist (`orders.releasable_at`, `payouts.reference`, `payouts.bank_code`,
+`payouts.failure_reason`). Either run the app once with `DDL_AUTO=update` to
+create them, or add them by hand before deploying.
+
 ## Why `ddl-auto=validate` in production
 
 Hibernate must never alter a production schema on boot. If entities and tables

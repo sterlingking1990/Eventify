@@ -42,6 +42,16 @@ public class PayoutController {
         return ResponseEntity.ok(payoutService.getBalance(user.getId()));
     }
 
+    /**
+     * The bank list, so the organiser picks a code rather than typing a name.
+     * Supplying that code is what lets the account be verified before an
+     * irreversible transfer.
+     */
+    @GetMapping("/banks")
+    public ResponseEntity<Object> listBanks() {
+        return ResponseEntity.ok(payoutService.listBanks());
+    }
+
     @PutMapping("/{payoutId}/process")
     @PreAuthorize("hasRole('ADMIN')")
     public ResponseEntity<PayoutResponse> processPayout(
@@ -54,7 +64,8 @@ public class PayoutController {
     @PreAuthorize("hasRole('ADMIN')")
     public ResponseEntity<PayoutResponse> rejectPayout(
             @PathVariable Long payoutId,
+            @RequestParam(required = false) String reason,
             @AuthenticationPrincipal CustomUserDetails admin) {
-        return ResponseEntity.ok(payoutService.rejectPayout(payoutId, admin.getId()));
+        return ResponseEntity.ok(payoutService.rejectPayout(payoutId, admin.getId(), reason));
     }
 }
