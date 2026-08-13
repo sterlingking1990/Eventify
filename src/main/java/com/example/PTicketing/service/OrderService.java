@@ -10,6 +10,7 @@ import com.example.PTicketing.exception.BadRequestException;
 import com.example.PTicketing.exception.ResourceNotFoundException;
 import com.example.PTicketing.repository.*;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -21,6 +22,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
 
+@Slf4j
 @Service
 @RequiredArgsConstructor
 public class OrderService {
@@ -381,14 +383,20 @@ public class OrderService {
         body.append("\nPresent your QR code at the event entrance for check-in.\n\n");
         body.append("Thank you for using Eventify!");
 
-        try {
-            emailService.sendSimpleEmail(
+        // EmailService swallows and logs its own failures, so a mail problem cannot
+        // unwind a completed sale. The previous empty catch here hid the outcome
+        // entirely — a buyer's ticket could silently never arrive with nothing in
+        // the logs to show for it.
+        boolean sent = emailService.sendSimpleEmail(
                 order.getBuyerEmail(),
                 "Your Eventify Tickets - " + order.getEvent().getTitle(),
                 body.toString()
-            );
-        } catch (Exception e) {
-            // Email failure should not break the order flow
+        );
+
+        if (!sent) {
+            log.warn("Order {} is paid and its tickets are issued, but the confirmation " +
+                     "email to {} was not sent. Tickets remain valid and retrievable.",
+                    order.getOrderRef(), order.getBuyerEmail());
         }
     }
 }
