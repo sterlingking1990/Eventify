@@ -39,4 +39,7 @@ public interface PayoutRepository extends JpaRepository<Payout, Long> {
                     @Param("to") PayoutStatus to,
                     @Param("adminId") Long adminId,
                     @Param("at") java.time.LocalDateTime at);
+
+    @Query("SELECT COALESCE(SUM(p.amount), 0) FROM Payout p WHERE p.status = :status")
+    BigDecimal sumAmountByStatus(@Param("status") PayoutStatus status);
 }

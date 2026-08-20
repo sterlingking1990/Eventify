@@ -122,4 +122,10 @@ public interface OrderRepository extends JpaRepository<Order, Long> {
            """)
     int pushReleaseDateForEvent(@Param("eventId") Long eventId,
                                 @Param("newReleaseAt") LocalDateTime newReleaseAt);
+
+    @Query("SELECT COALESCE(SUM(o.totalAmount), 0) FROM Order o WHERE o.paymentStatus = :status")
+    BigDecimal sumTotalByStatus(@Param("status") PaymentStatus status);
+
+    @Query("SELECT COALESCE(SUM(o.feeAmount), 0) FROM Order o WHERE o.paymentStatus = :status")
+    BigDecimal sumFeesByStatus(@Param("status") PaymentStatus status);
 }
