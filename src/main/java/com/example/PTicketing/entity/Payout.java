@@ -67,6 +67,34 @@ public class Payout {
     @JoinColumn(name = "processed_by")
     private User processedBy;
 
+    /** Cashout fee percent in effect when this request was made — frozen so a later admin change never changes it. */
+    private BigDecimal feePercentApplied;
+
+    /** amount * feePercentApplied / 100, at request time. */
+    private BigDecimal feeAmount;
+
+    /** amount - feeAmount — what actually gets sent to Paystack. */
+    private BigDecimal netAmount;
+
+    /** Admin-response SLA in effect when this request was made, in hours. */
+    private Integer slaHoursApplied;
+
+    /** requestedAt + slaHoursApplied — when this request is considered overdue for an admin response. */
+    private LocalDateTime responseDueAt;
+
+    /** Whether the SLA sweep has already notified admins this request is overdue, so it isn't repeated every sweep. */
+    @Builder.Default
+    private boolean slaBreachNotified = false;
+
+    /** Paystack transfer-recipient code, cached so it's created at most once per payout. */
+    private String paystackRecipientCode;
+
+    /** Paystack transfer code, needed to finalize or resend an OTP for this transfer. */
+    private String paystackTransferCode;
+
+    /** When an OTP was last requested from Paystack for this transfer, to drive a "resend" cooldown in the UI. */
+    private LocalDateTime otpRequestedAt;
+
     @PrePersist
     protected void onCreate() {
         this.requestedAt = LocalDateTime.now();
@@ -76,6 +104,9 @@ public class Payout {
         if (this.reference == null) {
             this.reference = "PAY-" + java.util.UUID.randomUUID()
                     .toString().replace("-", "").substring(0, 16).toUpperCase();
+        }
+        if (this.slaHoursApplied != null) {
+            this.responseDueAt = this.requestedAt.plusHours(this.slaHoursApplied);
         }
     }
 }

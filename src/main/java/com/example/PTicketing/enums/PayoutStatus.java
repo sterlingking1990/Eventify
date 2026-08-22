@@ -18,5 +18,16 @@ public enum PayoutStatus {
     PROCESSED,
 
     /** Rejected by an admin, or the transfer failed. Funds return to the balance. */
-    FAILED
+    FAILED,
+
+    /**
+     * The provider requires a one-time PIN before the transfer will complete.
+     *
+     * <p>Paystack sends this OTP out-of-band to the account holder (Brandible), not
+     * to Eventify — submitting it back is the second authorization required before
+     * money actually moves. Distinct from PROCESSING (whose outcome is unknown but
+     * needs no human action) because this state needs someone to act right now.
+     * Funds stay reserved while in this state.
+     */
+    OTP_PENDING
 }
