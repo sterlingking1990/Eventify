@@ -28,4 +28,20 @@ public class PaystackConfig {
     public String getPaymentCallbackUrl() {
         return frontendUrl + "/payment/success";
     }
+
+    public String getTransferRecipientUrl() {
+        return "https://api.paystack.co/transferrecipient";
+    }
+
+    public String getTransferUrl() {
+        return "https://api.paystack.co/transfer";
+    }
+
+    public String getFinalizeTransferUrl() {
+        return "https://api.paystack.co/transfer/finalize_transfer";
+    }
+
+    public String getResendOtpUrl() {
+        return "https://api.paystack.co/transfer/resend_otp";
+    }
 }
