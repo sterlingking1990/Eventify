@@ -2,6 +2,7 @@ package com.example.PTicketing.service;
 
 import com.example.PTicketing.config.PaystackConfig;
 import com.example.PTicketing.dto.paystack.PaystackTransferResult;
+import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
@@ -13,6 +14,7 @@ import org.springframework.web.client.RestTemplate;
 import javax.crypto.Mac;
 import javax.crypto.spec.SecretKeySpec;
 import java.math.BigDecimal;
+import java.util.List;
 import java.util.Map;
 
 @Service
@@ -115,8 +117,17 @@ public class PaystackService {
         }
     }
 
-    /** The provider's bank list, so the organiser picks a code rather than typing a name. */
-    public JsonNode listBanks() {
+    /**
+     * The provider's bank list, so the organiser picks a code rather than typing a name.
+     *
+     * <p>Returns plain maps rather than a Jackson {@code JsonNode} on purpose: this
+     * app's HTTP layer serialises with Jackson 3 (tools.jackson, via Boot 4), while
+     * the tree above is Jackson 2 (com.fasterxml, via jjwt). A foreign node type is
+     * not recognised as JSON and gets bean-serialised into its getter metadata —
+     * {"array":true,"bigDecimal":false,...} — which is exactly what shipped to the
+     * organiser dashboard and emptied the bank dropdown.
+     */
+    public List<Map<String, Object>> listBanks() {
         HttpHeaders headers = new HttpHeaders();
         headers.add("Authorization", "Bearer " + paystackConfig.getSecretKey());
 
@@ -127,7 +138,12 @@ public class PaystackService {
                     new HttpEntity<>(headers),
                     String.class
             );
-            return objectMapper.readTree(response.getBody()).path("data");
+            JsonNode data = objectMapper.readTree(response.getBody()).path("data");
+            if (!data.isArray()) {
+                throw new IllegalStateException(
+                        "Unexpected bank list response from provider: " + response.getBody());
+            }
+            return objectMapper.convertValue(data, new TypeReference<List<Map<String, Object>>>() {});
         } catch (Exception e) {
             throw new RuntimeException("Could not load bank list: " + e.getMessage());
         }

@@ -24,6 +24,7 @@ import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.time.LocalDateTime;
 import java.util.List;
+import java.util.Map;
 
 @Slf4j
 @Service
@@ -43,7 +44,7 @@ public class PayoutService {
     private int payoutHoldHours;
 
     /** The provider's bank list, for the organiser to pick a code from. */
-    public JsonNode listBanks() {
+    public List<Map<String, Object>> listBanks() {
         return paystackService.listBanks();
     }
 

@@ -16,6 +16,7 @@ import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
+import java.util.Map;
 
 @RestController
 @RequestMapping("/api/v1/payouts")
@@ -50,7 +51,7 @@ public class PayoutController {
      * irreversible transfer.
      */
     @GetMapping("/banks")
-    public ResponseEntity<Object> listBanks() {
+    public ResponseEntity<List<Map<String, Object>>> listBanks() {
         return ResponseEntity.ok(payoutService.listBanks());
     }
 
