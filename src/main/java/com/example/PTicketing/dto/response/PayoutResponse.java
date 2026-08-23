@@ -18,6 +18,7 @@ public class PayoutResponse {
     private String accountName;
     private PayoutStatus status;
     private String failureReason;
+    private Boolean accountNameMismatch;
     private LocalDateTime requestedAt;
     private LocalDateTime processedAt;
     private BigDecimal feePercentApplied;

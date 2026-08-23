@@ -121,6 +121,17 @@ dependencies in their own layer so source-only changes rebuild fast.
 
 ---
 
+## One-off: `payouts.account_name_mismatch` column
+
+Cashout requests whose bank-verified account name shares no token with the
+organiser's signup name — or that skipped verification by omitting a bank code —
+are flagged for the approving admin. The column does not exist in a schema
+created before it, and `ddl-auto=validate` will refuse to start until it does:
+
+```sql
+ALTER TABLE eventify.payouts ADD COLUMN IF NOT EXISTS account_name_mismatch BOOLEAN;
+```
+
 ## One-off: `event_scanners` table
 
 Scanner accounts can now only check tickets in for events they were assigned to

@@ -150,6 +150,41 @@ public class PayoutNotificationService {
         }
     }
 
+    /**
+     * Tells admins a cashout's destination account does not resemble the organiser
+     * before anyone approves it — the cheapest moment to catch a compromised login.
+     */
+    @Async
+    public void notifyNameMismatch(Payout payout) {
+        List<String> adminEmails = userRepository.findAll().stream()
+                .filter(u -> u.getRole() == UserRole.ADMIN)
+                .map(User::getEmail)
+                .filter(email -> email != null && !email.isBlank())
+                .toList();
+
+        if (adminEmails.isEmpty()) return;
+
+        String body = "Cashout request " + payout.getReference() + " for "
+                + money(payout.getAmount()) + " is flagged:\n\n"
+                + "Organiser: " + name(payout) + "\n"
+                + "Destination account: " + payout.getAccountName()
+                + " (" + payout.getBankName() + " " + payout.getAccountNumber() + ")\n"
+                + (Boolean.TRUE.equals(payout.getAccountNameMismatch())
+                        ? "The account holder's name shares no token with the organiser's signup name,\n"
+                          + "or the account was not verified with a bank code.\n"
+                        : "") + "\n"
+                + "Review it in the admin panel before approving.\n";
+
+        for (String email : adminEmails) {
+            try {
+                emailService.sendSimpleEmail(email,
+                        "Cashout flagged: account name mismatch", body);
+            } catch (Exception e) {
+                log.error("Failed to send name-mismatch notice to {}: {}", email, e.getMessage());
+            }
+        }
+    }
+
     private void send(Payout payout, String subject, String body) {
         User user = payout.getUser();
         if (user == null || user.getEmail() == null || user.getEmail().isBlank()) {

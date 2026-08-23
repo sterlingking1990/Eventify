@@ -12,6 +12,7 @@ import com.example.PTicketing.exception.BadRequestException;
 import com.example.PTicketing.exception.ResourceNotFoundException;
 import com.example.PTicketing.exception.UnauthorizedException;
 import com.example.PTicketing.repository.*;
+import com.example.PTicketing.util.AccountNameMatcher;
 import com.fasterxml.jackson.databind.JsonNode;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -78,6 +79,7 @@ public class PayoutService {
         // possible when a bank code was supplied; a provider outage returns null and
         // is allowed through rather than blocking a legitimate request.
         String verifiedName = null;
+        boolean nameVerified = false;
         if (request.getBankCode() != null && !request.getBankCode().isBlank()) {
             verifiedName = paystackService.resolveAccountName(
                     request.getAccountNumber(), request.getBankCode());
@@ -87,6 +89,22 @@ public class PayoutService {
                         "We could not verify that account number with the selected bank. " +
                         "Please check the details and try again.");
             }
+            nameVerified = true;
+        }
+
+        // The bank proves who owns the destination account, not that it belongs to
+        // the person asking. A holder sharing no name token with the organiser — or
+        // an unverified typed name on a bank-code-less request — is exactly the
+        // shape of a compromised-login cashout, so it rides along to the admin
+        // queue flagged rather than passing silently.
+        boolean accountNameMismatch = !nameVerified
+                || !AccountNameMatcher.looksLikeSamePerson(user.getFullName(), verifiedName);
+        if (accountNameMismatch) {
+            log.warn("Payout request by {} ({}) is flagged: destination account '{}' {}",
+                    user.getEmail(), userId,
+                    verifiedName != null ? verifiedName : request.getAccountName(),
+                    nameVerified ? "does not resemble the organiser's signup name"
+                                  : "was not verified with a bank code");
         }
 
         // Frozen at request time, alongside the bank verification above: the
@@ -108,6 +126,7 @@ public class PayoutService {
                 .accountNumber(request.getAccountNumber())
                 // Prefer the name the bank holds over what was typed.
                 .accountName(verifiedName != null ? verifiedName : request.getAccountName())
+                .accountNameMismatch(accountNameMismatch)
                 .feePercentApplied(feePercent)
                 .feeAmount(feeAmount)
                 .netAmount(netAmount)
@@ -119,6 +138,12 @@ public class PayoutService {
         log.info("Payout {} requested by user {} for {} to {} {}",
                 payout.getReference(), userId, payout.getAmount(),
                 payout.getBankName(), payout.getAccountNumber());
+
+        if (accountNameMismatch) {
+            // The request is saved and flagged either way; the mail is best-effort
+            // and async, so a slow SMTP server cannot delay or unwind the request.
+            payoutNotificationService.notifyNameMismatch(payout);
+        }
 
         return toResponse(payout);
     }
@@ -506,9 +531,10 @@ public class PayoutService {
                 .bankName(payout.getBankName())
                 .accountNumber(payout.getAccountNumber())
                 .accountName(payout.getAccountName())
-                .status(payout.getStatus())
-                .failureReason(payout.getFailureReason())
-                .requestedAt(payout.getRequestedAt())
+                  .status(payout.getStatus())
+                  .failureReason(payout.getFailureReason())
+                  .accountNameMismatch(payout.getAccountNameMismatch())
+                  .requestedAt(payout.getRequestedAt())
                 .processedAt(payout.getProcessedAt())
                 .feePercentApplied(payout.getFeePercentApplied())
                 .feeAmount(payout.getFeeAmount())
