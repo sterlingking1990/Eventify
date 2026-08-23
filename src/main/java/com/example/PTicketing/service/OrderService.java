@@ -33,12 +33,12 @@ public class OrderService {
     private final EventRepository eventRepository;
     private final UserRepository userRepository;
     private final PaystackService paystackService;
-    private final QrCodeService qrCodeService;
     private final EmailService emailService;
     private final DiscountService discountService;
     private final ReferralService referralService;
     private final PaystackConfig paystackConfig;
     private final PricingService pricingService;
+    private final QrSigningService qrSigningService;
     // One-way dependency: IntegrationOrderService does not reference this class, so
     // there is no bean cycle. Used only to reuse its channel-delivery path.
     private final IntegrationOrderService integrationOrderService;
@@ -300,7 +300,7 @@ public class OrderService {
         List<Ticket> tickets = new ArrayList<>();
 
         for (int i = 0; i < quantity; i++) {
-            String qrText = qrCodeService.generateQrCodeText();
+            String qrText = qrSigningService.mint(order.getEvent().getId());
 
             Ticket ticket = Ticket.builder()
                     .ticketType(ticketType)

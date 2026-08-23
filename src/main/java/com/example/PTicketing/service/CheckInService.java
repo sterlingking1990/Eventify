@@ -22,11 +22,30 @@ public class CheckInService {
     private final TicketRepository ticketRepository;
     private final EventRepository eventRepository;
     private final UserRepository userRepository;
+    private final EventScannerService eventScannerService;
+    private final QrSigningService qrSigningService;
 
     @Transactional
     public CheckInResponse scanTicket(String qrCode, Long scannerUserId) {
+        // Signature first, database second: a string claiming the signed format is
+        // verified before any ticket lookup happens, so a tampered token is refused
+        // without revealing whether its target exists.
+        QrSigningService.ParsedQr parsed = qrSigningService.parse(qrCode);
+
         Ticket ticket = ticketRepository.findByQrCode(qrCode)
                 .orElseThrow(() -> new BadRequestException("Invalid QR code: ticket not found"));
+
+        // The exact-match lookup above already makes cross-event reuse practically
+        // impossible; the binding check makes it categorically impossible, covering
+        // any future path that copies codes between tickets.
+        if (parsed.signed() && !ticket.getEvent().getId().equals(parsed.eventId())) {
+            throw new BadRequestException("Invalid QR code: issued for a different event");
+        }
+
+        User scanner = userRepository.findById(scannerUserId)
+                .orElseThrow(() -> new ResourceNotFoundException("Scanner not found"));
+
+        eventScannerService.assertAllowedToScan(scanner, ticket.getEvent());
 
         if (ticket.getStatus() != TicketStatus.ACTIVE) {
             return CheckInResponse.builder()
@@ -35,9 +54,6 @@ public class CheckInService {
                     .qrCode(qrCode)
                     .build();
         }
-
-        User scanner = userRepository.findById(scannerUserId)
-                .orElseThrow(() -> new ResourceNotFoundException("Scanner not found"));
 
         ticket.setStatus(TicketStatus.USED);
         ticket.setCheckedInAt(java.time.LocalDateTime.now());

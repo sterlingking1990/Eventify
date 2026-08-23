@@ -61,6 +61,7 @@ public class IntegrationOrderService {
     private final PricingService pricingService;
     private final QrHostingService qrHostingService;
     private final TicketDeliveryService ticketDeliveryService;
+    private final QrSigningService qrSigningService;
 
     /** How long an unpaid external order keeps its seats. */
     @Value("${integration.hold-minutes:30}")
@@ -224,7 +225,7 @@ public class IntegrationOrderService {
         List<Ticket> tickets = new ArrayList<>();
 
         for (int i = 0; i < quantity; i++) {
-            String qrText = UUID.randomUUID().toString();
+            String qrText = qrSigningService.mint(event.getId());
             Ticket ticket = ticketRepository.save(Ticket.builder()
                     .ticketType(ticketType)
                     .order(order)
@@ -264,8 +265,12 @@ public class IntegrationOrderService {
      * <p>Best-effort by design — never throws, because the caller has already taken
      * the buyer's money and issued their tickets. Repeat calls are safe:
      * send-ticket-whatsapp claims the session before messaging.
+     *
+     * <p>Not readOnly, same as getByReference: toResponse backfills a missing QR
+     * image through resolveQrImageUrl, and a read-only transaction would drop
+     * that write silently.
      */
-    @Transactional(readOnly = true)
+    @Transactional
     public void deliverExistingOrder(String paystackReference) {
         try {
             Order order = orderRepository.findByPaystackReference(paystackReference).orElse(null);

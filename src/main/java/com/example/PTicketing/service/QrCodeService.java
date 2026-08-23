@@ -7,14 +7,9 @@ import com.google.zxing.qrcode.QRCodeWriter;
 import org.springframework.stereotype.Service;
 
 import java.io.ByteArrayOutputStream;
-import java.util.UUID;
 
 @Service
 public class QrCodeService {
-
-    public String generateQrCodeText() {
-        return UUID.randomUUID().toString();
-    }
 
     public byte[] generateQrImage(String text, int width, int height) {
         try {
