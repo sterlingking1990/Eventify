@@ -191,6 +191,7 @@ public class AdminController {
             map.put("status", p.getStatus());
             map.put("reference", p.getReference());
             map.put("failureReason", p.getFailureReason());
+            map.put("accountNameMismatch", Boolean.TRUE.equals(p.getAccountNameMismatch()));
             map.put("requestedAt", p.getRequestedAt());
             map.put("processedAt", p.getProcessedAt());
             map.put("userName", p.getUser() != null ? p.getUser().getFullName() : "");

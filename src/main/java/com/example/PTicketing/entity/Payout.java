@@ -54,6 +54,16 @@ public class Payout {
     @Column(nullable = false)
     private PayoutStatus status;
 
+    /**
+     * Set when the bank-verified account holder's name shares no token with the
+     * organiser's signup name — or when no verification happened at all (request
+     * without a bank code). A flag for the approving admin, not a rejection: real
+     * accounts differ from signup names in ordinary ways, so this narrows who
+     * deserves a second look rather than deciding the money's fate.
+     */
+    @Column
+    private Boolean accountNameMismatch;
+
     /** Why a FAILED payout failed, for the organiser and for support. */
     @Column(columnDefinition = "TEXT")
     private String failureReason;
