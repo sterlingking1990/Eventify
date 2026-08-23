@@ -106,6 +106,15 @@ public class OrderService {
 
         PaymentMethod method = request.getPaymentMethod() != null ? request.getPaymentMethod() : PaymentMethod.PAYSTACK;
 
+        // Manual bank transfer paid organisers directly, outside Paystack and the
+        // ledger: no platform fee, no release hold, no cashout trail — and it put
+        // personal bank accounts on public event pages. All money now flows through
+        // the central Paystack account; the enum survives for historical orders.
+        if (method == PaymentMethod.TRANSFER) {
+            throw new BadRequestException(
+                    "Direct bank transfer is no longer supported. Please pay via Paystack.");
+        }
+
         Order order = Order.builder()
                 .orderRef(orderRef)
                 .event(event)
@@ -135,12 +144,6 @@ public class OrderService {
         }
 
         order = orderRepository.save(order);
-
-        if (method == PaymentMethod.TRANSFER) {
-            order.setPaymentStatus(PaymentStatus.PENDING_VERIFICATION);
-            order = orderRepository.save(order);
-            return toResponse(order, null, null);
-        }
 
         if (!ticketType.isFree() && totalAmount.compareTo(BigDecimal.ZERO) > 0) {
             String paystackRef = "PTK-" + UUID.randomUUID().toString().substring(0, 20).toUpperCase();
