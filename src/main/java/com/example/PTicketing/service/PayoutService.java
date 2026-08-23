@@ -43,6 +43,10 @@ public class PayoutService {
     @Value("${integration.payout-hold-hours:24}")
     private int payoutHoldHours;
 
+    /** How long a transfer may sit awaiting its OTP before admins get nagged. */
+    @Value("${integration.payout-otp-stale-hours:2}")
+    private int otpStaleHours;
+
     /** The provider's bank list, for the organiser to pick a code from. */
     public List<Map<String, Object>> listBanks() {
         return paystackService.listBanks();
@@ -286,6 +290,74 @@ public class PayoutService {
     }
 
     /**
+     * Admin escape hatch for a transfer whose OTP will never be entered.
+     *
+     * <p>Asks the provider what the transfer is actually doing before declaring
+     * anything. If it somehow already succeeded, the payout settles as PROCESSED —
+     * marking it FAILED there would hand the organiser their balance back while
+     * the money still lands, i.e. a double payout. Any other provider state, and
+     * an unverifiable one, is safe to abandon: the conditional claim below makes
+     * the decision atomic against a webhook or OTP submission racing the same row.
+     */
+    @Transactional
+    public PayoutResponse forceFailOtpPending(Long payoutId, Long adminId, String reason) {
+        userRepository.findById(adminId)
+                .orElseThrow(() -> new ResourceNotFoundException("Admin not found"));
+
+        Payout payout = payoutRepository.findById(payoutId)
+                .orElseThrow(() -> new ResourceNotFoundException("Payout not found"));
+
+        if (payout.getStatus() != PayoutStatus.OTP_PENDING) {
+            throw new BadRequestException(
+                    "This payout is " + payout.getStatus() + "; only OTP_PENDING payouts can be force-failed.");
+        }
+
+        String providerStatus = null;
+        boolean providerChecked = false;
+        if (payout.getPaystackTransferCode() != null && !payout.getPaystackTransferCode().isBlank()) {
+            try {
+                providerStatus = paystackService.verifyTransfer(payout.getPaystackTransferCode());
+                providerChecked = true;
+            } catch (Exception e) {
+                log.warn("Transfer {} could not be verified before force-fail: {}",
+                        payout.getReference(), e.getMessage());
+            }
+        }
+
+        if ("success".equals(providerStatus)) {
+            int settled = payoutRepository.claimStatusSystem(
+                    payoutId, PayoutStatus.OTP_PENDING, PayoutStatus.PROCESSED, LocalDateTime.now());
+            if (settled == 0) {
+                throw new BadRequestException("Payout already moved on — reload and check its status.");
+            }
+            payout = payoutRepository.findById(payoutId).orElseThrow();
+            log.warn("Payout {} force-fail found the transfer ALREADY SUCCEEDED at the provider "
+                    + "— settled as PROCESSED instead", payout.getReference());
+            payoutNotificationService.notifyDisbursed(payout);
+            return toResponse(payout);
+        }
+
+        String why = (reason != null && !reason.isBlank()) ? reason : "Force-failed by admin";
+        why += providerChecked
+                ? " (provider state at force-fail: " + providerStatus + ")"
+                : " (provider state could not be confirmed at the time)";
+
+        int claimed = payoutRepository.claimStatus(
+                payoutId, PayoutStatus.OTP_PENDING, PayoutStatus.FAILED, adminId, LocalDateTime.now());
+        if (claimed == 0) {
+            throw new BadRequestException("Payout already moved on — reload and check its status.");
+        }
+
+        payout = payoutRepository.findById(payoutId).orElseThrow();
+        payout.setFailureReason(why);
+        payout = payoutRepository.save(payout);
+
+        log.warn("Payout {} FORCE-FAILED by admin {}: {}", payout.getReference(), adminId, why);
+        payoutNotificationService.notifyDisbursementFailed(payout);
+        return toResponse(payout);
+    }
+
+    /**
      * Reconciles a payout against a Paystack transfer webhook.
      *
      * <p>Tries both PROCESSING and OTP_PENDING as the "from" state: the webhook can
@@ -385,12 +457,16 @@ public class PayoutService {
     }
 
     /**
-     * Flags cashout requests an admin hasn't acted on within their SLA.
+     * Flags payouts an admin has left hanging too long, in two flavours:
+     *
+     * <p>— cashout requests not approved or rejected within their SLA ({@code
+     * PENDING} past {@code responseDueAt}), and — transfers stuck waiting on a
+     * Paystack OTP nobody has entered ({@code OTP_PENDING}, stale after
+     * {@code integration.payout-otp-stale-hours}).
      *
      * <p>Modeled on {@code IntegrationOrderService.releaseExpiredHolds()}: a sweep
      * rather than a per-request timer, since the volume here doesn't warrant one.
-     * {@code slaBreachNotified} stops this from re-notifying the same request every
-     * time the sweep runs.
+     * {@code slaBreachNotified} stops either kind from re-notifying every run.
      */
     @Scheduled(fixedRateString = "${integration.payout-sla-sweep-ms:1800000}")
     @Transactional
@@ -398,15 +474,29 @@ public class PayoutService {
         List<Payout> overdue = payoutRepository.findByStatusAndResponseDueAtBeforeAndSlaBreachNotifiedFalse(
                 PayoutStatus.PENDING, LocalDateTime.now());
 
-        if (overdue.isEmpty()) return;
+        if (!overdue.isEmpty()) {
+            for (Payout p : overdue) {
+                p.setSlaBreachNotified(true);
+            }
+            payoutRepository.saveAll(overdue);
 
-        for (Payout p : overdue) {
-            p.setSlaBreachNotified(true);
+            payoutNotificationService.notifySlaBreach(overdue);
+            log.info("Flagged {} overdue payout(s)", overdue.size());
         }
-        payoutRepository.saveAll(overdue);
 
-        payoutNotificationService.notifySlaBreach(overdue);
-        log.info("Flagged {} overdue payout(s)", overdue.size());
+        LocalDateTime otpCutoff = LocalDateTime.now().minusHours(otpStaleHours);
+        List<Payout> staleOtp = payoutRepository.findByStatusAndProcessedAtBeforeAndSlaBreachNotifiedFalse(
+                PayoutStatus.OTP_PENDING, otpCutoff);
+
+        if (!staleOtp.isEmpty()) {
+            for (Payout p : staleOtp) {
+                p.setSlaBreachNotified(true);
+            }
+            payoutRepository.saveAll(staleOtp);
+
+            payoutNotificationService.notifyOtpStale(staleOtp);
+            log.info("Flagged {} payout(s) stuck awaiting an OTP", staleOtp.size());
+        }
     }
 
     private PayoutResponse toResponse(Payout payout) {

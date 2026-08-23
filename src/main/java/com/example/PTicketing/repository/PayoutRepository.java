@@ -19,6 +19,13 @@ public interface PayoutRepository extends JpaRepository<Payout, Long> {
     List<Payout> findByStatusAndResponseDueAtBeforeAndSlaBreachNotifiedFalse(
             PayoutStatus status, LocalDateTime cutoff);
 
+    /**
+     * Transfers stuck waiting on an OTP: {@code processedAt} doubles as the moment
+     * the payout entered the OTP flow, since approving is what stamps it.
+     */
+    List<Payout> findByStatusAndProcessedAtBeforeAndSlaBreachNotifiedFalse(
+            PayoutStatus status, LocalDateTime cutoff);
+
     @Query("SELECT COALESCE(SUM(p.amount), 0) FROM Payout p WHERE p.user.id = :userId AND p.status = :status")
     BigDecimal sumAmountByUserIdAndStatus(@Param("userId") Long userId, @Param("status") PayoutStatus status);
 

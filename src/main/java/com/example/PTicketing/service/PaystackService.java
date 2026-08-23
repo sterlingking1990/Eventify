@@ -254,9 +254,34 @@ public class PaystackService {
         }
     }
 
-    /** Asks Paystack to re-send the OTP for a transfer whose PIN expired before anyone entered it. */
-    public boolean resendTransferOtp(String transferCode) {
+    /**
+     * Asks Paystack what state one of our transfers is actually in, by transfer code.
+     *
+     * <p>Returns the provider's own status — "success", "failed", "otp", "pending",
+     * "abandoned" — or {@code null} when the check itself could not be completed.
+     * Callers must treat null as <b>unknown</b>, never as failure: deciding that
+     * money did not move based on a failed API call is how double payouts happen.
+     */
+    public String verifyTransfer(String transferCode) {
         HttpHeaders headers = new HttpHeaders();
+        headers.add("Authorization", "Bearer " + paystackConfig.getSecretKey());
+
+        try {
+            ResponseEntity<String> response = restTemplate.exchange(
+                    paystackConfig.getTransferUrl() + "/verify/" + transferCode,
+                    HttpMethod.GET,
+                    new HttpEntity<>(headers),
+                    String.class
+            );
+            return objectMapper.readTree(response.getBody())
+                    .path("data").path("status").asText(null);
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
+    /** Asks Paystack to re-send the OTP for a transfer whose PIN expired before anyone entered it. */
+    public boolean resendTransferOtp(String transferCode) {        HttpHeaders headers = new HttpHeaders();
         headers.add("Authorization", "Bearer " + paystackConfig.getSecretKey());
         headers.setContentType(MediaType.APPLICATION_JSON);
 
