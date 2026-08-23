@@ -128,4 +128,25 @@ public interface OrderRepository extends JpaRepository<Order, Long> {
 
     @Query("SELECT COALESCE(SUM(o.feeAmount), 0) FROM Order o WHERE o.paymentStatus = :status")
     BigDecimal sumFeesByStatus(@Param("status") PaymentStatus status);
+
+    /**
+     * Channel orders whose WhatsApp delivery may never have landed.
+     *
+     * <p>Paid, sold through an external channel (anything except 'web'), carrying
+     * a phone to message, and confirmed inside the window the reconciliation sweep
+     * replays. Web orders are excluded on purpose: their buyers have no WhatsApp
+     * session at the far end, so replaying them would fail forever rather than fix
+     * anything.
+     */
+    @Query("""
+           select o from Order o
+            where o.paymentStatus = com.example.PTicketing.enums.PaymentStatus.PAID
+              and o.sourceChannel is not null
+              and o.sourceChannel <> 'web'
+              and o.buyerPhone is not null
+              and o.paidAt >= :from
+              and o.paidAt <= :to
+           """)
+    List<Order> findChannelDeliveryCandidates(@Param("from") LocalDateTime from,
+                                              @Param("to") LocalDateTime to);
 }

@@ -70,6 +70,16 @@ projects, and transaction mode on 6543 breaks Hibernate's prepared statements.
 | `INTEGRATION_DELIVERY_WEBHOOK_URL` | `https://<brandible-ref>.supabase.co/functions/v1/send-ticket-whatsapp` |
 | `INTEGRATION_DELIVERY_API_KEY` | must equal `EVENTIFY_DELIVERY_KEY` in Brandible's Supabase secrets |
 
+Delivery reconciliation is on by default: every 15 min it replays channel orders
+paid in the last 48 h whose message may not have landed. The far end dedupes, so
+worst case is a redundant webhook call — tune with
+`INTEGRATION_DELIVERY_RECONCILE_MS` / `_MIN_AGE_MINUTES` / `_MAX_HOURS`.
+
+### QR signing
+| Variable | Notes |
+|---|---|
+| `QR_SIGNING_SECRET` | **generate a fresh one** (`openssl rand -hex 32`). Blank means new tickets get unsigned codes with no event binding — the app starts anyway and logs a warning. Rotating it makes future codes unverifiable against old signatures; only legacy-format codes keep working |
+
 ### URLs — the easiest thing to get wrong
 | Variable | Notes |
 |---|---|
@@ -110,6 +120,23 @@ dependencies in their own layer so source-only changes rebuild fast.
    them from the working file does not remove them from earlier commits.
 
 ---
+
+## One-off: `event_scanners` table
+
+Scanner accounts can now only check tickets in for events they were assigned to
+(`POST /api/v1/events/{eventId}/scanners`, organizer-only). The assignment table
+does not exist in a schema created before it, and `ddl-auto=validate` will refuse
+to start until it does:
+
+```sql
+CREATE TABLE IF NOT EXISTS eventify.event_scanners (
+    id         BIGSERIAL PRIMARY KEY,
+    event_id   BIGINT      NOT NULL REFERENCES eventify.events (id),
+    user_id    BIGINT      NOT NULL REFERENCES eventify.users (id),
+    created_at TIMESTAMP,
+    CONSTRAINT uq_event_scanners UNIQUE (event_id, user_id)
+);
+```
 
 ## One-off: backfill `releasable_at`
 
