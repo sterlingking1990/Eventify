@@ -362,10 +362,10 @@ public class PayoutService {
             return toResponse(payout);
         }
 
+        // The stored reason is organiser-facing — it travels in their failure email
+        // and payout history — so it carries only the admin's words. The provider
+        // state belongs to the audit trail, which is the log line below.
         String why = (reason != null && !reason.isBlank()) ? reason : "Force-failed by admin";
-        why += providerChecked
-                ? " (provider state at force-fail: " + providerStatus + ")"
-                : " (provider state could not be confirmed at the time)";
 
         int claimed = payoutRepository.claimStatus(
                 payoutId, PayoutStatus.OTP_PENDING, PayoutStatus.FAILED, adminId, LocalDateTime.now());
@@ -377,7 +377,9 @@ public class PayoutService {
         payout.setFailureReason(why);
         payout = payoutRepository.save(payout);
 
-        log.warn("Payout {} FORCE-FAILED by admin {}: {}", payout.getReference(), adminId, why);
+        log.warn("Payout {} FORCE-FAILED by admin {}: reason='{}'; provider state at force-fail: {}",
+                payout.getReference(), adminId, why,
+                providerChecked ? String.valueOf(providerStatus) : "not checked");
         payoutNotificationService.notifyDisbursementFailed(payout);
         return toResponse(payout);
     }
