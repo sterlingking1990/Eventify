@@ -1,7 +1,9 @@
 package com.example.PTicketing.controller;
 
+import com.example.PTicketing.dto.request.OtpRequest;
 import com.example.PTicketing.dto.request.PayoutRequest;
 import com.example.PTicketing.dto.response.BalanceResponse;
+import com.example.PTicketing.dto.response.FeeInfoResponse;
 import com.example.PTicketing.dto.response.PayoutResponse;
 import com.example.PTicketing.security.CustomUserDetails;
 import com.example.PTicketing.service.PayoutService;
@@ -57,7 +59,7 @@ public class PayoutController {
     public ResponseEntity<PayoutResponse> processPayout(
             @PathVariable Long payoutId,
             @AuthenticationPrincipal CustomUserDetails admin) {
-        return ResponseEntity.ok(payoutService.processPayout(payoutId, admin.getId()));
+        return ResponseEntity.ok(payoutService.approvePayout(payoutId, admin.getId()));
     }
 
     @PutMapping("/{payoutId}/reject")
@@ -67,5 +69,29 @@ public class PayoutController {
             @RequestParam(required = false) String reason,
             @AuthenticationPrincipal CustomUserDetails admin) {
         return ResponseEntity.ok(payoutService.rejectPayout(payoutId, admin.getId(), reason));
+    }
+
+    /** Submits the OTP Paystack sent to Brandible's registered contact, completing the transfer. */
+    @PutMapping("/{payoutId}/submit-otp")
+    @PreAuthorize("hasRole('ADMIN')")
+    public ResponseEntity<PayoutResponse> submitOtp(
+            @PathVariable Long payoutId,
+            @Valid @RequestBody OtpRequest request,
+            @AuthenticationPrincipal CustomUserDetails admin) {
+        return ResponseEntity.ok(payoutService.submitOtp(payoutId, request.getOtp(), admin.getId()));
+    }
+
+    @PutMapping("/{payoutId}/resend-otp")
+    @PreAuthorize("hasRole('ADMIN')")
+    public ResponseEntity<PayoutResponse> resendOtp(
+            @PathVariable Long payoutId,
+            @AuthenticationPrincipal CustomUserDetails admin) {
+        return ResponseEntity.ok(payoutService.resendOtp(payoutId, admin.getId()));
+    }
+
+    /** The current cashout fee % and admin-response SLA, so the organiser sees them before requesting. */
+    @GetMapping("/fee-info")
+    public ResponseEntity<FeeInfoResponse> getFeeInfo() {
+        return ResponseEntity.ok(payoutService.getFeeInfo());
     }
 }

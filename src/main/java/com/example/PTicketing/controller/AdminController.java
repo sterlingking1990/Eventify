@@ -1,5 +1,7 @@
 package com.example.PTicketing.controller;
 
+import com.example.PTicketing.dto.request.PlatformSettingsRequest;
+import com.example.PTicketing.dto.response.PlatformSettingsResponse;
 import com.example.PTicketing.entity.Event;
 import com.example.PTicketing.entity.Order;
 import com.example.PTicketing.entity.Payout;
@@ -14,9 +16,13 @@ import com.example.PTicketing.repository.OrderRepository;
 import com.example.PTicketing.repository.PayoutRepository;
 import com.example.PTicketing.repository.TicketRepository;
 import com.example.PTicketing.repository.UserRepository;
+import com.example.PTicketing.security.CustomUserDetails;
+import com.example.PTicketing.service.PlatformSettingsService;
+import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
+import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.*;
 
 import java.math.BigDecimal;
@@ -35,6 +41,7 @@ public class AdminController {
     private final OrderRepository orderRepository;
     private final TicketRepository ticketRepository;
     private final PayoutRepository payoutRepository;
+    private final PlatformSettingsService platformSettingsService;
 
     @GetMapping("/dashboard")
     public ResponseEntity<Map<String, Object>> getDashboard() {
@@ -55,6 +62,8 @@ public class AdminController {
         long pendingPayouts = payoutRepository.findByStatus(PayoutStatus.PENDING).size();
         BigDecimal pendingPayoutAmount = orZero(payoutRepository.sumAmountByStatus(PayoutStatus.PENDING));
         BigDecimal totalPaidOut = orZero(payoutRepository.sumAmountByStatus(PayoutStatus.PROCESSED));
+        BigDecimal inFlightPayoutAmount = orZero(payoutRepository.sumAmountByStatus(PayoutStatus.PROCESSING))
+                .add(orZero(payoutRepository.sumAmountByStatus(PayoutStatus.OTP_PENDING)));
 
         stats.put("totalUsers", totalUsers);
         stats.put("totalOrganizers", totalOrganizers);
@@ -67,6 +76,7 @@ public class AdminController {
         stats.put("pendingPayouts", pendingPayouts);
         stats.put("pendingPayoutAmount", pendingPayoutAmount);
         stats.put("totalPaidOut", totalPaidOut);
+        stats.put("inFlightPayoutAmount", inFlightPayoutAmount);
 
         return ResponseEntity.ok(stats);
     }
@@ -186,10 +196,28 @@ public class AdminController {
             map.put("userName", p.getUser() != null ? p.getUser().getFullName() : "");
             map.put("userEmail", p.getUser() != null ? p.getUser().getEmail() : "");
             map.put("userId", p.getUser() != null ? p.getUser().getId() : null);
+            map.put("feePercentApplied", p.getFeePercentApplied());
+            map.put("feeAmount", p.getFeeAmount());
+            map.put("netAmount", p.getNetAmount());
+            map.put("responseDueAt", p.getResponseDueAt());
+            map.put("paystackTransferCode", p.getPaystackTransferCode());
+            map.put("otpRequestedAt", p.getOtpRequestedAt());
             return map;
         }).toList();
 
         return ResponseEntity.ok(result);
+    }
+
+    @GetMapping("/settings")
+    public ResponseEntity<PlatformSettingsResponse> getSettings() {
+        return ResponseEntity.ok(platformSettingsService.getSettings());
+    }
+
+    @PutMapping("/settings")
+    public ResponseEntity<PlatformSettingsResponse> updateSettings(
+            @Valid @RequestBody PlatformSettingsRequest request,
+            @AuthenticationPrincipal CustomUserDetails admin) {
+        return ResponseEntity.ok(platformSettingsService.updateSettings(request, admin.getId()));
     }
 
     private BigDecimal orZero(BigDecimal v) {

@@ -17,6 +17,11 @@ public class PayoutResponse {
     private String accountNumber;
     private String accountName;
     private PayoutStatus status;
+    private String failureReason;
     private LocalDateTime requestedAt;
     private LocalDateTime processedAt;
+    private BigDecimal feePercentApplied;
+    private BigDecimal feeAmount;
+    private BigDecimal netAmount;
+    private LocalDateTime responseDueAt;
 }
