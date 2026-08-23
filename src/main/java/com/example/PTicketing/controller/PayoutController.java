@@ -90,6 +90,20 @@ public class PayoutController {
         return ResponseEntity.ok(payoutService.resendOtp(payoutId, admin.getId()));
     }
 
+    /**
+     * Escape hatch for a transfer whose OTP will never arrive. Verifies with the
+     * provider first, so a transfer that actually succeeded settles as PROCESSED
+     * rather than FAILED — the two states move money to opposite places.
+     */
+    @PutMapping("/{payoutId}/force-fail")
+    @PreAuthorize("hasRole('ADMIN')")
+    public ResponseEntity<PayoutResponse> forceFailOtpPending(
+            @PathVariable Long payoutId,
+            @RequestParam(required = false) String reason,
+            @AuthenticationPrincipal CustomUserDetails admin) {
+        return ResponseEntity.ok(payoutService.forceFailOtpPending(payoutId, admin.getId(), reason));
+    }
+
     /** The current cashout fee % and admin-response SLA, so the organiser sees them before requesting. */
     @GetMapping("/fee-info")
     public ResponseEntity<FeeInfoResponse> getFeeInfo() {

@@ -108,6 +108,48 @@ public class PayoutNotificationService {
         }
     }
 
+    @Async
+    public void notifyOtpStale(List<Payout> stalePayouts) {
+        if (stalePayouts.isEmpty()) return;
+
+        List<String> adminEmails = userRepository.findAll().stream()
+                .filter(u -> u.getRole() == UserRole.ADMIN)
+                .map(User::getEmail)
+                .filter(email -> email != null && !email.isBlank())
+                .toList();
+
+        if (adminEmails.isEmpty()) {
+            log.warn("{} payout(s) are stuck awaiting an OTP but no admin has an email to notify",
+                    stalePayouts.size());
+            return;
+        }
+
+        StringBuilder body = new StringBuilder();
+        body.append("The following transfers have been waiting for their Paystack OTP ")
+            .append("longer than expected:\n\n");
+        for (Payout p : stalePayouts) {
+            body.append("- ").append(p.getReference())
+                    .append(" — ").append(money(p.getNetAmount()))
+                    .append(", approved ").append(p.getProcessedAt())
+                    .append("\n");
+        }
+        body.append("\nThe organiser's funds stay reserved while these hang. Enter the OTP ")
+            .append("(if it can still arrive), resend it, or force-fail the payout in the ")
+            .append("admin panel.\n");
+
+        String subject = stalePayouts.size() == 1
+                ? "1 transfer is stuck waiting on an OTP"
+                : stalePayouts.size() + " transfers are stuck waiting on an OTP";
+
+        for (String email : adminEmails) {
+            try {
+                emailService.sendSimpleEmail(email, subject, body.toString());
+            } catch (Exception e) {
+                log.error("Failed to send stale-OTP notice to {}: {}", email, e.getMessage());
+            }
+        }
+    }
+
     private void send(Payout payout, String subject, String body) {
         User user = payout.getUser();
         if (user == null || user.getEmail() == null || user.getEmail().isBlank()) {
